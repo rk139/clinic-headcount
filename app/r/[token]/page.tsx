@@ -36,6 +36,33 @@ export default function ResponsePage() {
   // ✅ Option A: after a successful submit, hide the choice buttons
   const [locked, setLocked] = useState(false);
 
+  // ✅ allow 1+ kid names per RSVP submission
+  // START WITH ONE FIELD (cleaner UX)
+  const [kidNames, setKidNames] = useState<string[]>([""]);
+  const [submittedKidNames, setSubmittedKidNames] = useState<string[]>([]);
+
+  function updateKidName(i: number, value: string) {
+    setKidNames((prev) => prev.map((v, idx) => (idx === i ? value : v)));
+  }
+
+  function addKidField() {
+    setKidNames((prev) => [...prev, ""]);
+  }
+
+  function removeKidField(i: number) {
+    setKidNames((prev) => {
+      const next = prev.filter((_, idx) => idx !== i);
+      return next.length ? next : [""];
+    });
+  }
+
+  function cleanedKidNames() {
+    return kidNames
+      .map((n) => n.trim())
+      .filter((n) => n.length > 0)
+      .slice(0, 6); // prevent abuse; adjust if needed
+  }
+
   useEffect(() => {
     if (!token) return;
 
@@ -52,6 +79,8 @@ export default function ResponsePage() {
           setSession(null);
           setSavedChoice(null);
           setLocked(false);
+          setKidNames([""]);
+          setSubmittedKidNames([]);
           return;
         }
 
@@ -69,11 +98,17 @@ export default function ResponsePage() {
         setIsError(false);
         setShowSuccessAnim(false);
         setStatus("idle");
+
+        // Reset kid name inputs on load
+        setKidNames([""]);
+        setSubmittedKidNames([]);
       } catch {
         setError("Something went wrong loading this link.");
         setSession(null);
         setSavedChoice(null);
         setLocked(false);
+        setKidNames([""]);
+        setSubmittedKidNames([]);
       } finally {
         setLoading(false);
       }
@@ -89,11 +124,21 @@ export default function ResponsePage() {
     setSubmitting(true);
     setShowSuccessAnim(false);
 
+    const names = cleanedKidNames();
+
+    // Require at least one kid name if attending
+    if (choice === "attending" && names.length === 0) {
+      setIsError(true);
+      setMessage("Please enter at least one kid’s name.");
+      setSubmitting(false);
+      return;
+    }
+
     try {
       const res = await fetch(`/api/r/${token}/respond`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ choice }),
+        body: JSON.stringify({ choice, kidNames: names }),
       });
 
       const data = await res.json();
@@ -107,6 +152,7 @@ export default function ResponsePage() {
 
       // Update “server truth”
       setSavedChoice(choice);
+      setSubmittedKidNames(names);
 
       setMessage(
         choice === "attending"
@@ -229,9 +275,53 @@ export default function ResponsePage() {
             {/* Buttons / Done-state */}
             {showSessionUI ? (
               <>
+                {/* ✅ Kid names inputs (only while choosing) */}
+                {!locked ? (
+                  <div className="mt-8">
+                    <div className="text-sm font-semibold text-black/70 text-center">
+                      Enter kid name(s)
+                    </div>
+
+                    <div className="mt-4 space-y-3">
+                      {kidNames.map((value, i) => (
+                        <div key={i} className="flex gap-2">
+                          <input
+                            value={value}
+                            onChange={(e) => updateKidName(i, e.target.value)}
+                            placeholder={i === 0 ? "Kid name" : `Kid name ${i + 1}`}
+                            // ✅ higher contrast for typed text + placeholder
+                            className="w-full rounded-xl border border-black/15 px-4 py-3 text-sm text-black placeholder:text-black/40 focus:outline-none focus:ring-2 focus:ring-black/30"
+                          />
+
+                          {/* ✅ Only show remove button if there is more than 1 field */}
+                          {kidNames.length > 1 ? (
+                            <button
+                              type="button"
+                              onClick={() => removeKidField(i)}
+                              className="shrink-0 rounded-xl border border-black/15 px-3 py-3 text-sm font-semibold text-black/60 hover:bg-black/5"
+                              aria-label="Remove name field"
+                              title="Remove"
+                            >
+                              ✕
+                            </button>
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={addKidField}
+                      className="mt-4 w-full rounded-full border border-[#1f1f1f] bg-white px-6 py-3 text-sm font-bold uppercase text-[#1f1f1f] hover:bg-black/5 transition"
+                    >
+                      + Add another kid
+                    </button>
+                  </div>
+                ) : null}
+
                 {/* If not locked, show the two choices */}
                 {!locked ? (
-                  <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <button
                       disabled={submitting}
                       onClick={() => onChoose("attending")}
@@ -278,6 +368,16 @@ export default function ResponsePage() {
                         </span>
                       </div>
 
+                      {savedChoice === "attending" &&
+                      submittedKidNames.length > 0 ? (
+                        <div className="mt-3 text-xs text-green-800/90">
+                          <div className="font-semibold">Names:</div>
+                          <div className="mt-1">
+                            {submittedKidNames.join(", ")}
+                          </div>
+                        </div>
+                      ) : null}
+
                       <div className="mt-2 text-xs text-green-700/80">
                         If you need to change it, you can update your response
                         below.
@@ -321,3 +421,5 @@ export default function ResponsePage() {
     </div>
   );
 }
+
+

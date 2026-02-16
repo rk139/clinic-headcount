@@ -3,6 +3,22 @@ import { PrismaClient } from "@prisma/client";
 
 const prisma = new PrismaClient();
 
+function toYMD(d: Date) {
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function normalizeKidNames(value: unknown): string[] {
+  // kidNames is Json? so it can be null/undefined/array/etc.
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((n): n is string => typeof n === "string")
+    .map((n) => n.trim())
+    .filter((n) => n.length > 0);
+}
+
 export async function GET() {
   // Return sessions for the next 14 days (including today)
   const start = new Date();
@@ -10,13 +26,6 @@ export async function GET() {
 
   const end = new Date(start);
   end.setDate(end.getDate() + 14);
-
-  const toYMD = (d: Date) => {
-    const yyyy = d.getFullYear();
-    const mm = String(d.getMonth() + 1).padStart(2, "0");
-    const dd = String(d.getDate()).padStart(2, "0");
-    return `${yyyy}-${mm}-${dd}`;
-  };
 
   const sessions = await prisma.clinicSession.findMany({
     where: {
@@ -35,6 +44,7 @@ export async function GET() {
             select: {
               choice: true,
               createdAt: true,
+              kidNames: true, // ✅ NEW
             },
           },
         },
@@ -50,11 +60,31 @@ export async function GET() {
 
     let attendingCount = 0;
     let notAttendingCount = 0;
+
+    // ✅ NEW: counts based on number of kids listed
+    let attendingKidsCount = 0;
+    let notAttendingKidsCount = 0;
+
+    // ✅ NEW: flattened name lists
+    const attendingKidNames: string[] = [];
+    const notAttendingKidNames: string[] = [];
+
     let lastResponseAt: string | null = null;
 
     for (const r of responses) {
-      if (r.choice === "attending") attendingCount += 1;
-      if (r.choice === "not_attending") notAttendingCount += 1;
+      const names = normalizeKidNames(r.kidNames);
+
+      if (r.choice === "attending") {
+        attendingCount += 1;
+        attendingKidsCount += names.length;
+        attendingKidNames.push(...names);
+      }
+
+      if (r.choice === "not_attending") {
+        notAttendingCount += 1;
+        notAttendingKidsCount += names.length;
+        notAttendingKidNames.push(...names);
+      }
 
       const iso = r.createdAt.toISOString();
       if (!lastResponseAt || iso > lastResponseAt) {
@@ -77,12 +107,17 @@ export async function GET() {
 
       attendingCount,
       notAttendingCount,
+      attendingKidsCount,
+      notAttendingKidsCount,
+      attendingKidNames,
+      notAttendingKidNames,
       lastResponseAt,
     };
   });
 
   return NextResponse.json(withTotals);
 }
+
 
 
 

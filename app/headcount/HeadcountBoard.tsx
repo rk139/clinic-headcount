@@ -17,9 +17,16 @@ type ClinicSession = {
   // Step 4 + Step 6
   responseLink?: { token: string; closedAt?: string | null } | null;
 
-  // Step 5: response totals
+  // Step 5: response totals (number of submissions)
   attendingCount?: number;
   notAttendingCount?: number;
+
+  // ✅ NEW: kid-based totals + names
+  attendingKidsCount?: number;
+  notAttendingKidsCount?: number;
+  attendingKidNames?: string[];
+  notAttendingKidNames?: string[];
+
   lastResponseAt?: string | null;
 };
 
@@ -33,6 +40,19 @@ function displayName(s: ClinicSession) {
   return s.programType;
 }
 
+function uniquePreserveOrder(names: string[]) {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const n of names) {
+    const key = n.trim().toLowerCase();
+    if (!key) continue;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(n.trim());
+  }
+  return out;
+}
+
 export default function HeadcountBoard() {
   const [sessions, setSessions] = useState<ClinicSession[]>([]);
   const [saving, setSaving] = useState<Record<string, boolean>>({});
@@ -43,6 +63,11 @@ export default function HeadcountBoard() {
 
   // Step 6 UI state (close/reopen)
   const [closeBusyId, setCloseBusyId] = useState<string | null>(null);
+
+  // ✅ NEW: toggle showing names per session
+  const [openNamesForId, setOpenNamesForId] = useState<Record<string, boolean>>(
+    {}
+  );
 
   const load = async () => {
     setError("");
@@ -68,7 +93,9 @@ export default function HeadcountBoard() {
   const dates = useMemo(() => Array.from(byDate.keys()).sort(), [byDate]);
 
   const updateLocal = (id: string, patch: Partial<ClinicSession>) => {
-    setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)));
+    setSessions((prev) =>
+      prev.map((s) => (s.id === id ? { ...s, ...patch } : s))
+    );
   };
 
   const saveRow = async (s: ClinicSession) => {
@@ -142,7 +169,9 @@ export default function HeadcountBoard() {
     setCloseBusyId(sessionId);
 
     try {
-      const res = await fetch(`/api/links/${sessionId}/close`, { method: "POST" });
+      const res = await fetch(`/api/links/${sessionId}/close`, {
+        method: "POST",
+      });
       if (!res.ok) {
         const msg = await res.json().catch(() => ({}));
         throw new Error(msg?.error || "Failed to close link");
@@ -161,7 +190,9 @@ export default function HeadcountBoard() {
     setCloseBusyId(sessionId);
 
     try {
-      const res = await fetch(`/api/links/${sessionId}/close`, { method: "DELETE" });
+      const res = await fetch(`/api/links/${sessionId}/close`, {
+        method: "DELETE",
+      });
       if (!res.ok) {
         const msg = await res.json().catch(() => ({}));
         throw new Error(msg?.error || "Failed to reopen link");
@@ -198,7 +229,11 @@ export default function HeadcountBoard() {
       color: "#d4d4db",
       cursor: "pointer",
     } as React.CSSProperties,
-    dateHeader: { fontSize: 18, marginBottom: 10, color: "#eaeaf0" } as React.CSSProperties,
+    dateHeader: {
+      fontSize: 18,
+      marginBottom: 10,
+      color: "#eaeaf0",
+    } as React.CSSProperties,
     card: {
       border: "1px solid #2a2a33",
       borderRadius: 14,
@@ -267,6 +302,35 @@ export default function HeadcountBoard() {
       padding: "10px 12px",
       borderRadius: 12,
     } as React.CSSProperties,
+
+    // ✅ NEW: names UI
+    namesBtn: {
+      padding: "6px 10px",
+      borderRadius: 10,
+      border: "1px solid #2a2a33",
+      background: "transparent",
+      color: "#d4d4db",
+      cursor: "pointer",
+    } as React.CSSProperties,
+    namesPanel: {
+      marginTop: 10,
+      border: "1px solid #2a2a33",
+      borderRadius: 12,
+      background: "#0b0b0f",
+      padding: 10,
+      color: "#d4d4db",
+    } as React.CSSProperties,
+    namePill: {
+      display: "inline-block",
+      fontSize: 12,
+      padding: "4px 8px",
+      borderRadius: 999,
+      border: "1px solid #2a2a33",
+      background: "#0f0f16",
+      color: "#eaeaf0",
+      marginRight: 8,
+      marginBottom: 8,
+    } as React.CSSProperties,
   };
 
   return (
@@ -280,7 +344,9 @@ export default function HeadcountBoard() {
         <button onClick={load} style={styles.refreshBtn}>
           Refresh
         </button>
-        <span style={styles.subText}>Tip: edit counts → Save (persists to database)</span>
+        <span style={styles.subText}>
+          Tip: edit counts → Save (persists to database)
+        </span>
       </div>
 
       {error ? (
@@ -301,6 +367,21 @@ export default function HeadcountBoard() {
                 const hasLink = !!s.responseLink?.token;
                 const isClosed = !!s.responseLink?.closedAt;
                 const busy = linkBusyId === s.id || closeBusyId === s.id;
+
+                // ✅ NEW: kid name derived values (with dedupe)
+                const yesNames = uniquePreserveOrder(s.attendingKidNames ?? []);
+                const noNames = uniquePreserveOrder(s.notAttendingKidNames ?? []);
+
+                const yesKids = s.attendingKidsCount ?? yesNames.length;
+                const noKids = s.notAttendingKidsCount ?? noNames.length;
+
+                const isNamesOpen = !!openNamesForId[s.id];
+
+                const toggleNames = () =>
+                  setOpenNamesForId((prev) => ({
+                    ...prev,
+                    [s.id]: !prev[s.id],
+                  }));
 
                 return (
                   <div key={s.id} style={styles.card}>
@@ -324,6 +405,19 @@ export default function HeadcountBoard() {
                           {s.attendingCount ?? 0} Yes / {s.notAttendingCount ?? 0} No
                         </strong>
                       </span>
+
+                      {/* ✅ NEW: kid-based totals */}
+                      <span>
+                        RSVP kids:{" "}
+                        <strong style={{ color: "#eaeaf0" }}>
+                          {yesKids} Yes / {noKids} No
+                        </strong>
+                      </span>
+
+                      {/* ✅ NEW: toggle names */}
+                      <button type="button" onClick={toggleNames} style={styles.namesBtn}>
+                        {isNamesOpen ? "Hide names" : "Show names"}
+                      </button>
 
                       <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
                         {!hasLink ? (
@@ -371,6 +465,45 @@ export default function HeadcountBoard() {
                       </span>
                     </div>
 
+                    {/* ✅ NEW: names panel */}
+                    {isNamesOpen ? (
+                      <div style={styles.namesPanel}>
+                        <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>
+                          Attending ({yesNames.length})
+                        </div>
+                        {yesNames.length ? (
+                          <div style={{ marginBottom: 10 }}>
+                            {yesNames.map((n) => (
+                              <span key={`y-${n}`} style={styles.namePill}>
+                                {n}
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <div style={{ fontSize: 12, color: "#a1a1aa", marginBottom: 10 }}>
+                            No names yet.
+                          </div>
+                        )}
+
+                        <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>
+                          Not attending ({noNames.length})
+                        </div>
+                        {noNames.length ? (
+                          <div>
+                            {noNames.map((n) => (
+                              <span key={`n-${n}`} style={styles.namePill}>
+                                {n}
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <div style={{ fontSize: 12, color: "#a1a1aa" }}>
+                            No names yet.
+                          </div>
+                        )}
+                      </div>
+                    ) : null}
+
                     <div style={styles.row}>
                       <label style={styles.label}>
                         Full
@@ -378,7 +511,9 @@ export default function HeadcountBoard() {
                           type="number"
                           value={s.fullSessionCount}
                           onChange={(e) =>
-                            updateLocal(s.id, { fullSessionCount: Number(e.target.value) })
+                            updateLocal(s.id, {
+                              fullSessionCount: Number(e.target.value),
+                            })
                           }
                           style={styles.input}
                           min={0}
@@ -404,7 +539,9 @@ export default function HeadcountBoard() {
                           type="number"
                           value={s.singleDateCount}
                           onChange={(e) =>
-                            updateLocal(s.id, { singleDateCount: Number(e.target.value) })
+                            updateLocal(s.id, {
+                              singleDateCount: Number(e.target.value),
+                            })
                           }
                           style={styles.input}
                           min={0}
@@ -429,6 +566,7 @@ export default function HeadcountBoard() {
     </main>
   );
 }
+
 
 
 

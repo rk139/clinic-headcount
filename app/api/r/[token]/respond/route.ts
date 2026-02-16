@@ -17,7 +17,7 @@ export async function POST(
 
   try {
     const body = (await req.json().catch(() => null)) as
-      | { choice?: Choice }
+      | { choice?: Choice; kidNames?: unknown }
       | null;
 
     const choice = body?.choice;
@@ -27,6 +27,18 @@ export async function POST(
         { status: 400 }
       );
     }
+
+    // NEW: one RSVP submission can include 1+ kid names
+    // Example incoming: ["Ayaan", "Anika"]
+    const rawKidNames = body?.kidNames;
+
+    const kidNames = Array.isArray(rawKidNames)
+      ? rawKidNames
+          .filter((n): n is string => typeof n === "string")
+          .map((n) => n.trim())
+          .filter((n) => n.length > 0)
+          .slice(0, 6) // small cap to prevent abuse; adjust if you want
+      : [];
 
     const link = await prisma.responseLink.findUnique({
       where: { token },
@@ -85,6 +97,7 @@ export async function POST(
           data: {
             linkId: link.id,
             choice, // Prisma field is "choice"
+            kidNames: kidNames.length ? kidNames : null,
           },
         });
       }
@@ -94,6 +107,7 @@ export async function POST(
       ok: true,
       id: created.id,
       choice: created.choice,
+      kidNames: created.kidNames,
       replaced,
       previousChoice,
     });

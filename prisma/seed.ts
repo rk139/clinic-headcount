@@ -17,14 +17,18 @@ function addDays(d: Date, days: number) {
 
 async function main() {
   // Clear existing sessions (Phase 0 convenience)
+  // NOTE: this wipes & recreates sessions each time you seed.
+  // Later, we can switch to "upsert" so you don't wipe real RSVP data.
   await prisma.clinicSession.deleteMany();
 
   const sessions: any[] = [];
   const today = new Date();
 
-  // Seed next 14 days
-  for (let i = 0; i < 14; i++) {
-    const d = addDays(today, i);
+  // ✅ Seed from today through May 10, 2026 (adjust as needed)
+  const end = new Date("2026-05-10T00:00:00");
+
+  // Loop day-by-day from today to end date (inclusive)
+  for (let d = new Date(today); d <= end; d = addDays(d, 1)) {
     const date = ymd(d);
     const dow = d.getDay(); // 0 Sun, 1 Mon, 2 Tue, 3 Wed, 4 Thu, 5 Fri, 6 Sat
 
@@ -165,3 +169,4 @@ main()
   .finally(async () => {
     await prisma.$disconnect();
   });
+
