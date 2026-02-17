@@ -97,7 +97,7 @@ export async function POST(
           data: {
             linkId: link.id,
             choice, // Prisma field is "choice"
-            kidNames: kidNames.length ? kidNames : null,
+            kidNames: kidNames.length ? kidNames : undefined,
           },
         });
       }
