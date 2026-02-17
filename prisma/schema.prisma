@@ -5,8 +5,9 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("POSTGRES_PRISMA_URL")       // pooled connection (best for Vercel)
+  directUrl = env("POSTGRES_URL_NON_POOLING")  // direct connection (migrations)
 }
 
 model ClinicSession {
@@ -39,8 +40,8 @@ model ClinicSession {
 }
 
 model ResponseLink {
-  id        String @id @default(cuid())
-  token     String @unique
+  id    String @id @default(cuid())
+  token String @unique
 
   // one-to-one with ClinicSession (Step 4 "create or reuse")
   sessionId String @unique
@@ -60,7 +61,7 @@ model ResponseLink {
 }
 
 model SessionResponse {
-  id     String @id @default(cuid())
+  id String @id @default(cuid())
 
   linkId String
   link   ResponseLink @relation(fields: [linkId], references: [id], onDelete: Cascade)
@@ -69,7 +70,7 @@ model SessionResponse {
   // Expected: "attending" | "not_attending"
   choice String
 
-  // NEW: one RSVP submission can include 1+ kid names
+  // one RSVP submission can include 1+ kid names
   kidNames Json?
 
   createdAt DateTime @default(now())
@@ -77,6 +78,7 @@ model SessionResponse {
   @@index([linkId])
   @@index([createdAt])
 }
+
 
 
 
