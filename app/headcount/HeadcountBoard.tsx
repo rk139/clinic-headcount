@@ -21,7 +21,7 @@ type ClinicSession = {
   attendingCount?: number;
   notAttendingCount?: number;
 
-  // ✅ NEW: kid-based totals + names
+  // ✅ kid-based totals + names
   attendingKidsCount?: number;
   notAttendingKidsCount?: number;
   attendingKidNames?: string[];
@@ -53,6 +53,11 @@ function uniquePreserveOrder(names: string[]) {
   return out;
 }
 
+function safeSnippet(s: string, max = 400) {
+  const t = s.replace(/\s+/g, " ").trim();
+  return t.length > max ? `${t.slice(0, max)}…` : t;
+}
+
 export default function HeadcountBoard() {
   const [sessions, setSessions] = useState<ClinicSession[]>([]);
   const [saving, setSaving] = useState<Record<string, boolean>>({});
@@ -64,20 +69,60 @@ export default function HeadcountBoard() {
   // Step 6 UI state (close/reopen)
   const [closeBusyId, setCloseBusyId] = useState<string | null>(null);
 
-  // ✅ NEW: toggle showing names per session
+  // ✅ toggle showing names per session
   const [openNamesForId, setOpenNamesForId] = useState<Record<string, boolean>>(
     {}
   );
 
   const load = async () => {
     setError("");
-    const res = await fetch("/api/sessions", { cache: "no-store" });
-    const data = (await res.json()) as ClinicSession[];
-    setSessions(data);
+
+    try {
+      const res = await fetch("/api/sessions", { cache: "no-store" });
+
+      // If server returned an error (500/404/etc), don't try res.json() blindly.
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(
+          `Failed to load sessions (${res.status}). ${safeSnippet(text)}`
+        );
+      }
+
+      // Even if res.ok, still protect against invalid JSON.
+      const raw = await res.text();
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        throw new Error(
+          `Failed to parse /api/sessions as JSON. ${safeSnippet(raw)}`
+        );
+      }
+
+      // If API returned { error: "..." }, show it cleanly.
+      if (
+        parsed &&
+        typeof parsed === "object" &&
+        "error" in parsed &&
+        typeof (parsed as any).error === "string"
+      ) {
+        throw new Error((parsed as any).error);
+      }
+
+      if (!Array.isArray(parsed)) {
+        throw new Error(`Unexpected /api/sessions response shape.`);
+      }
+
+      setSessions(parsed as ClinicSession[]);
+    } catch (e: any) {
+      setError(e?.message ?? "Failed to load sessions");
+      setSessions([]); // keep UI stable
+    }
   };
 
   useEffect(() => {
     load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const byDate = useMemo(() => {
@@ -139,7 +184,7 @@ export default function HeadcountBoard() {
 
       if (!res.ok) {
         const msg = await res.json().catch(() => ({}));
-        throw new Error(msg?.error || `Failed to generate link`);
+        throw new Error((msg as any)?.error || `Failed to generate link`);
       }
 
       await load();
@@ -174,7 +219,7 @@ export default function HeadcountBoard() {
       });
       if (!res.ok) {
         const msg = await res.json().catch(() => ({}));
-        throw new Error(msg?.error || "Failed to close link");
+        throw new Error((msg as any)?.error || "Failed to close link");
       }
       await load();
     } catch (e: any) {
@@ -195,7 +240,7 @@ export default function HeadcountBoard() {
       });
       if (!res.ok) {
         const msg = await res.json().catch(() => ({}));
-        throw new Error(msg?.error || "Failed to reopen link");
+        throw new Error((msg as any)?.error || "Failed to reopen link");
       }
       await load();
     } catch (e: any) {
@@ -302,8 +347,6 @@ export default function HeadcountBoard() {
       padding: "10px 12px",
       borderRadius: 12,
     } as React.CSSProperties,
-
-    // ✅ NEW: names UI
     namesBtn: {
       padding: "6px 10px",
       borderRadius: 10,
@@ -368,7 +411,6 @@ export default function HeadcountBoard() {
                 const isClosed = !!s.responseLink?.closedAt;
                 const busy = linkBusyId === s.id || closeBusyId === s.id;
 
-                // ✅ NEW: kid name derived values (with dedupe)
                 const yesNames = uniquePreserveOrder(s.attendingKidNames ?? []);
                 const noNames = uniquePreserveOrder(s.notAttendingKidNames ?? []);
 
@@ -385,7 +427,9 @@ export default function HeadcountBoard() {
 
                 return (
                   <div key={s.id} style={styles.card}>
-                    <div style={{ display: "flex", justifyContent: "space-between" }}>
+                    <div
+                      style={{ display: "flex", justifyContent: "space-between" }}
+                    >
                       <strong style={{ fontSize: 18 }}>{displayName(s)}</strong>
                       <span style={styles.subText}>
                         {s.startTime}–{s.endTime}
@@ -402,11 +446,11 @@ export default function HeadcountBoard() {
                       <span>
                         Responses:{" "}
                         <strong style={{ color: "#eaeaf0" }}>
-                          {s.attendingCount ?? 0} Yes / {s.notAttendingCount ?? 0} No
+                          {s.attendingCount ?? 0} Yes /{" "}
+                          {s.notAttendingCount ?? 0} No
                         </strong>
                       </span>
 
-                      {/* ✅ NEW: kid-based totals */}
                       <span>
                         RSVP kids:{" "}
                         <strong style={{ color: "#eaeaf0" }}>
@@ -414,12 +458,17 @@ export default function HeadcountBoard() {
                         </strong>
                       </span>
 
-                      {/* ✅ NEW: toggle names */}
-                      <button type="button" onClick={toggleNames} style={styles.namesBtn}>
+                      <button
+                        type="button"
+                        onClick={toggleNames}
+                        style={styles.namesBtn}
+                      >
                         {isNamesOpen ? "Hide names" : "Show names"}
                       </button>
 
-                      <span style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+                      <span
+                        style={{ marginLeft: "auto", display: "flex", gap: 8 }}
+                      >
                         {!hasLink ? (
                           <button
                             type="button"
@@ -427,7 +476,9 @@ export default function HeadcountBoard() {
                             disabled={linkBusyId === s.id}
                             style={styles.linkBtn(linkBusyId === s.id)}
                           >
-                            {linkBusyId === s.id ? "Generating..." : "Generate Link"}
+                            {linkBusyId === s.id
+                              ? "Generating..."
+                              : "Generate Link"}
                           </button>
                         ) : isClosed ? (
                           <>
@@ -443,7 +494,9 @@ export default function HeadcountBoard() {
                           </>
                         ) : (
                           <>
-                            <span style={styles.linkChip}>/r/{s.responseLink!.token}</span>
+                            <span style={styles.linkChip}>
+                              /r/{s.responseLink!.token}
+                            </span>
                             <button
                               type="button"
                               onClick={() => copyLink(s.responseLink!.token, s.id)}
@@ -465,10 +518,15 @@ export default function HeadcountBoard() {
                       </span>
                     </div>
 
-                    {/* ✅ NEW: names panel */}
                     {isNamesOpen ? (
                       <div style={styles.namesPanel}>
-                        <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>
+                        <div
+                          style={{
+                            fontSize: 12,
+                            fontWeight: 700,
+                            marginBottom: 6,
+                          }}
+                        >
                           Attending ({yesNames.length})
                         </div>
                         {yesNames.length ? (
@@ -480,12 +538,24 @@ export default function HeadcountBoard() {
                             ))}
                           </div>
                         ) : (
-                          <div style={{ fontSize: 12, color: "#a1a1aa", marginBottom: 10 }}>
+                          <div
+                            style={{
+                              fontSize: 12,
+                              color: "#a1a1aa",
+                              marginBottom: 10,
+                            }}
+                          >
                             No names yet.
                           </div>
                         )}
 
-                        <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>
+                        <div
+                          style={{
+                            fontSize: 12,
+                            fontWeight: 700,
+                            marginBottom: 6,
+                          }}
+                        >
                           Not attending ({noNames.length})
                         </div>
                         {noNames.length ? (

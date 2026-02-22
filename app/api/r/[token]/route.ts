@@ -25,8 +25,7 @@ function formatDateLabel(yyyyMmDd: string) {
   });
 }
 
-function programLabel(programType: string) {
-  if (programType === "RED_BALL") return "Clinic Session";
+function programLabel(_programType: string) {
   return "Clinic Session";
 }
 
@@ -41,13 +40,29 @@ function sessionStartMs(date: string, startTime: string) {
   return d.getTime();
 }
 
+type Choice = "attending" | "not_attending";
+
+function normalizeKidNames(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((n): n is string => typeof n === "string")
+    .map((n) => n.trim())
+    .filter((n) => n.length > 0)
+    .slice(0, 6);
+}
+
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ token: string }> }
 ) {
   const { token } = await params;
 
   try {
+    // ✅ Optional: familyCode query param
+    const url = new URL(req.url);
+    const rawFamilyCode = url.searchParams.get("familyCode") ?? "";
+    const familyCode = rawFamilyCode.trim().toUpperCase();
+
     const link = await prisma.responseLink.findUnique({
       where: { token },
       include: { session: true },
@@ -60,10 +75,18 @@ export async function GET(
       );
     }
 
-    // If you still want manual expiresAt support, keep this:
+    // Optional expiresAt support
     if (link.expiresAt && link.expiresAt.getTime() < Date.now()) {
       return NextResponse.json(
         { ok: false, error: "This link has expired" },
+        { status: 410 }
+      );
+    }
+
+    // ✅ manual close support
+    if (link.closedAt) {
+      return NextResponse.json(
+        { ok: false, error: "This link is closed." },
         { status: 410 }
       );
     }
@@ -77,17 +100,37 @@ export async function GET(
       );
     }
 
+    // ✅ If familyCode is provided, return latest response for THAT family
+    let currentChoice: Choice | null = null;
+    let currentKidNames: string[] = [];
+
+    if (familyCode) {
+      const latest = await prisma.sessionResponse.findFirst({
+        where: { linkId: link.id, familyCode },
+        orderBy: { createdAt: "desc" },
+        select: { choice: true, kidNames: true },
+      });
+
+      if (latest?.choice === "attending" || latest?.choice === "not_attending") {
+        currentChoice = latest.choice;
+      }
+
+      currentKidNames = normalizeKidNames(latest?.kidNames);
+    }
+
     const s = link.session;
 
     return NextResponse.json({
       ok: true,
       session: {
         dateLabel: formatDateLabel(s.date),
-        timeLabel: `${formatTime(s.startTime)} - ${formatTime(s.endTime)}`, // hyphen avoids weird encoding
+        timeLabel: `${formatTime(s.startTime)} - ${formatTime(s.endTime)}`,
         programLabel: programLabel(s.programType),
         groupLabel: groupLabel(s.programType, s.level),
         locationLabel: "Springside Athletic Club",
       },
+      currentChoice,
+      currentKidNames,
     });
   } catch (err) {
     console.error("GET /api/r/[token] failed:", err);

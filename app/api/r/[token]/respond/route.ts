@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import type { Prisma } from "@prisma/client";
 
 function sessionStartMs(date: string, startTime: string) {
   const d = new Date(`${date}T${startTime}:00`);
@@ -17,7 +16,7 @@ export async function POST(
 
   try {
     const body = (await req.json().catch(() => null)) as
-      | { choice?: Choice; kidNames?: unknown }
+      | { choice?: Choice; kidNames?: unknown; familyCode?: unknown }
       | null;
 
     const choice = body?.choice;
@@ -28,26 +27,53 @@ export async function POST(
       );
     }
 
-    // NEW: one RSVP submission can include 1+ kid names
-    // Example incoming: ["Ayaan", "Anika"]
+    const rawFamilyCode = body?.familyCode;
+    const familyCode =
+      typeof rawFamilyCode === "string"
+        ? rawFamilyCode.trim().toUpperCase()
+        : "";
+
+    if (!familyCode) {
+      return NextResponse.json(
+        { ok: false, error: "Family Code is required" },
+        { status: 400 }
+      );
+    }
+
+    // LASTNAME + 2 digits (e.g., MILLER07)
+    if (!/^[A-Z]{3,}\d{2}$/.test(familyCode)) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Family Code must look like MILLER07 (LASTNAME + 2 digits).",
+        },
+        { status: 400 }
+      );
+    }
+
     const rawKidNames = body?.kidNames;
 
-    const kidNames = Array.isArray(rawKidNames)
-      ? rawKidNames
-          .filter((n): n is string => typeof n === "string")
-          .map((n) => n.trim())
-          .filter((n) => n.length > 0)
-          .slice(0, 6) // small cap to prevent abuse; adjust if you want
-      : [];
+    // ✅ Fix 1: only allow kidNames when attending
+    const kidNames =
+      choice === "attending" && Array.isArray(rawKidNames)
+        ? rawKidNames
+            .filter((n): n is string => typeof n === "string")
+            .map((n) => n.trim())
+            .filter((n) => n.length > 0)
+            .slice(0, 6)
+        : [];
+
+    if (choice === "attending" && kidNames.length === 0) {
+      return NextResponse.json(
+        { ok: false, error: "Please enter at least one kid’s name." },
+        { status: 400 }
+      );
+    }
 
     const link = await prisma.responseLink.findUnique({
       where: { token },
       include: {
         session: true,
-        responses: {
-          orderBy: { createdAt: "desc" },
-          take: 1,
-        },
       },
     });
 
@@ -58,7 +84,6 @@ export async function POST(
       );
     }
 
-    // Optional expiresAt support
     if (link.expiresAt && link.expiresAt.getTime() < Date.now()) {
       return NextResponse.json(
         { ok: false, error: "This link has expired" },
@@ -66,7 +91,6 @@ export async function POST(
       );
     }
 
-    // ✅ Step 6: manual close support
     if (link.closedAt) {
       return NextResponse.json(
         { ok: false, error: "This link is closed." },
@@ -74,7 +98,6 @@ export async function POST(
       );
     }
 
-    // Close at clinic start time
     const start = sessionStartMs(link.session.date, link.session.startTime);
     if (!Number.isNaN(start) && Date.now() >= start) {
       return NextResponse.json(
@@ -83,29 +106,37 @@ export async function POST(
       );
     }
 
-    const previousChoice = link.responses[0]?.choice ?? null;
+    const prev = await prisma.sessionResponse.findFirst({
+      where: { linkId: link.id, familyCode },
+      orderBy: { createdAt: "desc" },
+    });
+
+    const previousChoice = prev?.choice ?? null;
     const replaced = previousChoice !== null;
 
-    // ✅ Latest response wins (atomic)
-    const created = await prisma.$transaction(
-      async (tx: Prisma.TransactionClient) => {
-        await tx.sessionResponse.deleteMany({
-          where: { linkId: link.id },
-        });
-
-        return tx.sessionResponse.create({
-          data: {
+    const created = await prisma.sessionResponse.upsert({
+        where: {
+          linkId_familyCode: {
             linkId: link.id,
-            choice, // Prisma field is "choice"
-            kidNames: kidNames.length ? kidNames : undefined,
+            familyCode,
           },
-        });
-      }
-    );
+        },
+        update: {
+          choice,
+          kidNames: kidNames.length ? kidNames : undefined,
+        },
+        create: {
+          linkId: link.id,
+          familyCode,
+          choice,
+          kidNames: kidNames.length ? kidNames : undefined,
+        },
+      });
 
     return NextResponse.json({
       ok: true,
       id: created.id,
+      familyCode, // ✅ Fix 2
       choice: created.choice,
       kidNames: created.kidNames,
       replaced,

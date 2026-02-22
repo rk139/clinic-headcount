@@ -6,35 +6,30 @@ generator client {
 
 datasource db {
   provider  = "postgresql"
-  url       = env("POSTGRES_PRISMA_URL")       // pooled connection (best for Vercel)
-  directUrl = env("POSTGRES_URL_NON_POOLING")  // direct connection (migrations)
+  url       = env("POSTGRES_PRISMA_URL")
+  directUrl = env("POSTGRES_URL_NON_POOLING")
 }
 
 model ClinicSession {
   id        String @id @default(cuid())
-  date      String // "YYYY-MM-DD"
-  startTime String // "HH:MM" 24-hour
-  endTime   String // "HH:MM" 24-hour
+  date      String
+  startTime String
+  endTime   String
 
-  // Keep as String so your existing seed/API keeps working
-  // Expected values you already use: "JUNIORS" | "RED_BALL"
   programType String
-  level       Int? // 1-4 for juniors, null for red ball
+  level       Int?
 
   capacity Int
 
-  // Phase 0 attendance breakdown
   fullSessionCount Int @default(0)
   makeUpCount      Int @default(0)
   singleDateCount  Int @default(0)
 
-  // Phase 1: one reusable response link per session
   responseLink ResponseLink?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  // Helpful for listing/grouping
   @@index([date])
   @@index([programType, level])
 }
@@ -43,17 +38,11 @@ model ResponseLink {
   id    String @id @default(cuid())
   token String @unique
 
-  // one-to-one with ClinicSession (Step 4 "create or reuse")
   sessionId String @unique
   session   ClinicSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
-  // Optional guardrail — you can keep it even if you compute “closed” in API
   expiresAt DateTime?
-
-  // ✅ Step 6: manual close / reopen support
-  // null   = open
-  // set    = manually closed
-  closedAt DateTime?
+  closedAt  DateTime?
 
   createdAt DateTime @default(now())
 
@@ -63,18 +52,21 @@ model ResponseLink {
 model SessionResponse {
   id String @id @default(cuid())
 
+  familyCode String
+
   linkId String
   link   ResponseLink @relation(fields: [linkId], references: [id], onDelete: Cascade)
 
-  // Keep as String so your existing POST body stays the same
-  // Expected: "attending" | "not_attending"
   choice String
-
-  // one RSVP submission can include 1+ kid names
   kidNames Json?
 
   createdAt DateTime @default(now())
 
+  // ✅ FINAL TOUCH:
+  // One row per family per link — database enforced.
+  @@unique([linkId, familyCode])
+
+  // Helpful indexes
   @@index([linkId])
   @@index([createdAt])
 }
