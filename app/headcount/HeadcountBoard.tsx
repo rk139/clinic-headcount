@@ -100,6 +100,9 @@ export default function HeadcountBoard() {
   //For session pairings 
   const [pairingsBySessionId, setPairingsBySessionId] = useState<Record<string, string[][]>>({});
 
+  //finalized pairing state 
+  const [finalizedBySessionId, setFinalizedSessionId] = useState<Record<string, boolean>>({});
+
   const load = async () => {
     setError("");
 
@@ -278,7 +281,7 @@ export default function HeadcountBoard() {
 
   // Pairings Handelers
 
-  const gerneratePairings = (sessionId: string, groupSize = 4) => {
+  const generatePairings = (sessionId: string, groupSize = 4) => {
     const s = sessions.find((x) => x.id === sessionId);
     if(!s) return;
 
@@ -307,6 +310,22 @@ export default function HeadcountBoard() {
     });
   };
 
+  //pin helper functions
+  const COACH_PIN = "1234"; //TEMP PIN
+  const requirePin = () => (window.prompt("Enter coach PIN:") ?? "").trim();
+
+  //pin handelers 
+  const finalizeSession = (sessionId: string) => {
+    const pin = requirePin();
+    if(pin !== COACH_PIN) return alert("WRONG PIN");
+    setFinalizedSessionId((prev) => ({...prev, [sessionId]: true}))
+  };
+
+  const unlockSession = (sessionId: string) => {
+    const pin = requirePin();
+    if(pin !== COACH_PIN) return alert("WRONG PIN");
+    setFinalizedSessionId((prev) => ({...prev, [sessionId]: false}));
+  };
 
   const styles = {
     page: {
@@ -471,6 +490,7 @@ export default function HeadcountBoard() {
 
                 const yesNames = uniquePreserveOrder(s.attendingKidNames ?? []);
                 const pairings = pairingsBySessionId[s.id];
+                const isFinal = !!finalizedBySessionId[s.id];
                 const noNames = uniquePreserveOrder(s.notAttendingKidNames ?? []);
 
                 const yesKids = s.attendingKidsCount ?? yesNames.length;
@@ -580,7 +600,8 @@ export default function HeadcountBoard() {
                     <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
                         <button
                           type= "button"
-                          onClick={() => gerneratePairings(s.id)}
+                          onClick={() => generatePairings(s.id)}
+                          disabled={isFinal}
                           style={styles.namesBtn}>
                             Generate Pairings
                           </button>
@@ -588,10 +609,24 @@ export default function HeadcountBoard() {
                         <button
                           type="button"
                           onClick={() => clearPairings(s.id)}
-                          disabled={!pairings}
+                          disabled={isFinal||!pairings}
                           style={styles.namesBtn}>
                             Clear Pairings
                         </button>
+
+                        <button
+                         type = "button"
+                         onClick={() => finalizeSession(s.id)}
+                         style={styles.namesBtn}>
+                            Finalize
+                         </button>
+                        
+                        <button
+                         type= "button"
+                         onClick={() => unlockSession(s.id)}
+                         style={styles.namesBtn}>
+                            Unlock
+                         </button>
 
                         {yesNames.length < 2 ? (
                             <span style={styles.subText}>Not enough kids to pair</span>
