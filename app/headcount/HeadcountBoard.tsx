@@ -58,6 +58,29 @@ function safeSnippet(s: string, max = 400) {
   return t.length > max ? `${t.slice(0, max)}…` : t;
 }
 
+//pairings helper functions 
+
+function shuffle(names: string[]){
+    const arr = [...names];
+    for (let i = arr.length -1; i > 0; i--){
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+}
+
+function chunk(names: string[], groupSize: number) {
+    const out: string[][] = [];
+    for (let i = 0; i < names.length; i+= groupSize) {
+        out.push(names.slice(i,i + groupSize));
+    }
+    return out;
+}
+
+function cleanName(n: string) {
+    return n.replace(/\s+/g, " ").trim();
+}
+
 export default function HeadcountBoard() {
   const [sessions, setSessions] = useState<ClinicSession[]>([]);
   const [saving, setSaving] = useState<Record<string, boolean>>({});
@@ -73,6 +96,9 @@ export default function HeadcountBoard() {
   const [openNamesForId, setOpenNamesForId] = useState<Record<string, boolean>>(
     {}
   );
+
+  //For session pairings 
+  const [pairingsBySessionId, setPairingsBySessionId] = useState<Record<string, string[][]>>({});
 
   const load = async () => {
     setError("");
@@ -250,6 +276,38 @@ export default function HeadcountBoard() {
     }
   };
 
+  // Pairings Handelers
+
+  const gerneratePairings = (sessionId: string, groupSize = 4) => {
+    const s = sessions.find((x) => x.id === sessionId);
+    if(!s) return;
+
+    const raw = s.attendingKidNames ?? [];
+    const cleaned = raw.map(cleanName).filter(Boolean);
+
+    //dedupe while preserving order (you already do this elsewhere)
+    const deduped = uniquePreserveOrder(cleaned);
+
+    if (deduped.length < 2){
+        setPairingsBySessionId((prev) => ({...prev,[sessionId]: []}));
+        return;
+    }
+
+    const shuffled = shuffle(deduped);
+    const courts = chunk(shuffled, groupSize);
+
+    setPairingsBySessionId((prev) => ({...prev, [sessionId]: courts}));
+  };
+
+  const clearPairings = (sessionId: string) => {
+    setPairingsBySessionId((prev) => {
+        const copy = {...prev};
+        delete copy[sessionId];
+        return copy;
+    });
+  };
+
+
   const styles = {
     page: {
       minHeight: "100vh",
@@ -412,6 +470,7 @@ export default function HeadcountBoard() {
                 const busy = linkBusyId === s.id || closeBusyId === s.id;
 
                 const yesNames = uniquePreserveOrder(s.attendingKidNames ?? []);
+                const pairings = pairingsBySessionId[s.id];
                 const noNames = uniquePreserveOrder(s.notAttendingKidNames ?? []);
 
                 const yesKids = s.attendingKidsCount ?? yesNames.length;
@@ -517,6 +576,53 @@ export default function HeadcountBoard() {
                         )}
                       </span>
                     </div>
+
+                    <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                        <button
+                          type= "button"
+                          onClick={() => gerneratePairings(s.id)}
+                          style={styles.namesBtn}>
+                            Generate Pairings
+                          </button>
+
+                        <button
+                          type="button"
+                          onClick={() => clearPairings(s.id)}
+                          disabled={!pairings}
+                          style={styles.namesBtn}>
+                            Clear Pairings
+                        </button>
+
+                        {yesNames.length < 2 ? (
+                            <span style={styles.subText}>Not enough kids to pair</span>
+                        
+                        ) : null}
+                    </div> 
+
+                    {pairings ? (
+                        pairings.length ? (
+                            <div style={{marginTop: 10}}>
+                                {pairings.map((court,idx) => (
+                                    <div key={`${s.id}-court-${idx}`} style={{marginBottom:6}}>
+                                        <div style={{fontSize: 12, fontWeight: 700, marginBottom: 4}}>
+                                            Court {idx + 1}
+                                        </div>
+                                        <div>
+                                            {court.map((n) => (
+                                                <span key={`${s.id}-${idx}-${n}`} style={styles.namePill}>
+                                                    {n}
+                                                </span>
+                                            ))}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        ) :(
+                            <div style={{marginTop: 10, ...styles.subText}}>
+                                Not enough kids to pair
+                            </div>
+                        )
+                    ): null}
 
                     {isNamesOpen ? (
                       <div style={styles.namesPanel}>
