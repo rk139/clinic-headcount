@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { DateTime } from "luxon";
 
 function sessionStartMs(date: string, startTime: string) {
-  const d = new Date(`${date}T${startTime}:00`);
-  return d.getTime();
+  const ZONE = "America/New_York";
+  const dt = DateTime.fromISO(`${date}T${startTime}`, { zone: ZONE });
+  return dt.isValid ? dt.toMillis() : NaN;
 }
 
 type Choice = "attending" | "not_attending";
@@ -136,7 +138,7 @@ export async function POST(
     return NextResponse.json({
       ok: true,
       id: created.id,
-      familyCode, // ✅ Fix 2
+      familyCode,
       choice: created.choice,
       kidNames: created.kidNames,
       replaced,
