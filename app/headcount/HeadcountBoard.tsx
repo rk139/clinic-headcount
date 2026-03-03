@@ -2,6 +2,27 @@
 
 import { useEffect, useMemo, useState } from "react";
 
+//drag n drop imports 
+import {
+    DndContext,
+    PointerSensor,
+    TouchSensor,
+    closestCenter,
+    useSensor,
+    useSensors,
+    type DragEndEvent,
+    type DragOverEvent,
+  } from "@dnd-kit/core";
+  
+  import {
+    SortableContext,
+    useSortable,
+    arrayMove,
+    verticalListSortingStrategy,
+  } from "@dnd-kit/sortable";
+  
+  import { CSS } from "@dnd-kit/utilities";
+
 type ClinicSession = {
   id: string;
   date: string;
@@ -81,6 +102,43 @@ function cleanName(n: string) {
     return n.replace(/\s+/g, " ").trim();
 }
 
+  
+  
+  function DraggableKidPill({
+    id,
+    disabled,
+  }: {
+    id: string;
+    disabled: boolean;
+  }) {
+    const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+      useSortable({ id, disabled });
+  
+    const style: React.CSSProperties = {
+      padding: "4px 8px",
+      borderRadius: 999,
+      border: "1px solid #2a2a33",
+      background: "#0f0f16",
+      color: "#eaeaf0",
+      cursor: disabled ? "not-allowed" : "grab",
+      opacity: disabled ? 0.6 : 1,
+      boxShadow: isDragging ? "0 6px 18px rgba(0,0,0,0.12)" : undefined,
+      transform: CSS.Transform.toString(transform),
+      transition,
+      userSelect: "none",
+      touchAction: "none",
+      display: "inline-flex",
+      marginRight: 8,
+      marginBottom: 8,
+    };
+  
+    return (
+      <span ref={setNodeRef} style={style} {...attributes} {...listeners}>
+        {id}
+      </span>
+    );
+  }
+
 export default function HeadcountBoard() {
   const [sessions, setSessions] = useState<ClinicSession[]>([]);
   const [saving, setSaving] = useState<Record<string, boolean>>({});
@@ -102,6 +160,19 @@ export default function HeadcountBoard() {
 
   //finalized pairing state 
   const [finalizedBySessionId, setFinalizedSessionId] = useState<Record<string, boolean>>({});
+
+  //drag n drop 
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 6 },
+    }),
+    useSensor(TouchSensor, {
+      activationConstraint: {
+        delay: 150,      // press-and-hold a moment
+        tolerance: 8,    // allow slight finger movement
+      },
+    })
+  );
 
   const load = async () => {
     setError("");
@@ -325,6 +396,89 @@ export default function HeadcountBoard() {
     const pin = requirePin();
     if(pin !== COACH_PIN) return alert("WRONG PIN");
     setFinalizedSessionId((prev) => ({...prev, [sessionId]: false}));
+  };
+
+  //frag n drop functions 
+
+  function courtId(sessionId: string, courtIndex: number) {
+    return `court:${sessionId}:${courtIndex}`;
+  }
+  
+  function parseCourtId(id: string) {
+    // "court:SESSION:INDEX"
+    const [prefix, sessionId, idx] = id.split(":");
+    if (prefix !== "court") return null;
+    const courtIndex = Number(idx);
+    if (!sessionId || Number.isNaN(courtIndex)) return null;
+    return { sessionId, courtIndex };
+  }
+  
+  function findCourtForKid(pairings: string[][], kidName: string) {
+    for (let i = 0; i < pairings.length; i++) {
+      if (pairings[i]?.includes(kidName)) return i;
+    }
+    return -1;
+  }
+
+  const handleDragOver =
+  (sessionId: string) =>
+  (e: DragOverEvent) => {
+    const activeId = String(e.active.id);
+    const overId = e.over?.id ? String(e.over.id) : null;
+    if (!overId) return;
+
+    setPairingsBySessionId((prev) => {
+      const current = prev[sessionId];
+      if (!current || current.length === 0) return prev;
+
+      const fromCourt = findCourtForKid(current, activeId);
+      if (fromCourt < 0) return prev;
+
+      const overCourtParsed = parseCourtId(overId);
+
+      let toCourt = -1;
+      if (overCourtParsed?.sessionId === sessionId) {
+        toCourt = overCourtParsed.courtIndex;
+      } else {
+        toCourt = findCourtForKid(current, overId);
+      }
+
+      if (toCourt < 0 || toCourt === fromCourt) return prev;
+
+      const next = current.map((c) => [...c]);
+      next[fromCourt] = next[fromCourt].filter((n) => n !== activeId);
+      next[toCourt].push(activeId);
+
+      return { ...prev, [sessionId]: next };
+    });
+  };
+
+  const handleDragEnd =
+  (sessionId: string) =>
+  (e: DragEndEvent) => {
+    const activeId = String(e.active.id);
+    const overId = e.over?.id ? String(e.over.id) : null;
+    if (!overId) return;
+
+    const overCourtParsed = parseCourtId(overId);
+    if (overCourtParsed?.sessionId === sessionId) return;
+
+    setPairingsBySessionId((prev) => {
+      const current = prev[sessionId];
+      if (!current || current.length === 0) return prev;
+
+      const courtIdx = findCourtForKid(current, activeId);
+      if (courtIdx < 0) return prev;
+
+      const overIdx = current[courtIdx].indexOf(overId);
+      const activeIdx = current[courtIdx].indexOf(activeId);
+      if (activeIdx === -1 || overIdx === -1 || activeIdx === overIdx) return prev;
+
+      const next = current.map((c) => [...c]);
+      next[courtIdx] = arrayMove(next[courtIdx], activeIdx, overIdx);
+
+      return { ...prev, [sessionId]: next };
+    });
   };
 
   const styles = {
@@ -636,28 +790,57 @@ export default function HeadcountBoard() {
 
                     {pairings ? (
                         pairings.length ? (
-                            <div style={{marginTop: 10}}>
-                                {pairings.map((court,idx) => (
-                                    <div key={`${s.id}-court-${idx}`} style={{marginBottom:6}}>
-                                        <div style={{fontSize: 12, fontWeight: 700, marginBottom: 4}}>
-                                            Court {idx + 1}
-                                        </div>
-                                        <div>
-                                            {court.map((n) => (
-                                                <span key={`${s.id}-${idx}-${n}`} style={styles.namePill}>
-                                                    {n}
-                                                </span>
-                                            ))}
-                                        </div>
-                                    </div>
-                                ))}
+                            <DndContext
+                            sensors={sensors}
+                            collisionDetection={closestCenter}
+                            onDragOver={isFinal ? undefined : handleDragOver(s.id)}
+                            onDragEnd={isFinal ? undefined: handleDragEnd(s.id)}
+                            >
+                            <div style={{ marginTop: 10 }}>
+                            {pairings.map((court, idx) => {
+                              const cId = courtId(s.id, idx);
+
+                              return (
+                                <div
+                                  key={cId}
+                                  id={cId}
+                                  style={{ marginBottom: 10 }}
+                                >
+                                  <div
+                                    style={{
+                                      fontSize: 12,
+                                      fontWeight: 700,
+                                      marginBottom: 6,
+                                    }}
+                                  >
+                                    Court {idx + 1} {isFinal && "(Finalized)"}
+                                  </div>
+
+                                  <SortableContext
+                                    items={court}
+                                    strategy={verticalListSortingStrategy}
+                                  >
+                                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                      {court.map((n) => (
+                                        <DraggableKidPill
+                                          key={n}
+                                          id={n}
+                                          disabled={isFinal}
+                                    />
+                                  ))}
+                                </div>
+                              </SortableContext>
                             </div>
-                        ) :(
-                            <div style={{marginTop: 10, ...styles.subText}}>
-                                Not enough kids to pair
-                            </div>
-                        )
-                    ): null}
+                          );
+                        })}
+                      </div>
+                    </DndContext>
+                  ) : (
+                    <div style={{ marginTop: 10, ...styles.subText }}>
+                      Not enough kids to pair
+                    </div>
+                  )
+                ) : null}
 
                     {isNamesOpen ? (
                       <div style={styles.namesPanel}>
