@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { DateTime } from "luxon";
 
 function formatTime(hhmm: string) {
   const [hhStr, mmStr] = hhmm.split(":");
@@ -35,9 +36,9 @@ function groupLabel(programType: string, level: number | null) {
 }
 
 function sessionStartMs(date: string, startTime: string) {
-  // Local time assumption (fine for Phase 1)
-  const d = new Date(`${date}T${startTime}:00`);
-  return d.getTime();
+   const ZONE = "America/New_York";
+   const dt = DateTime.fromISO(`${date}T${startTime}`, { zone: ZONE });
+   return dt.isValid ? dt.toMillis() : NaN;
 }
 
 type Choice = "attending" | "not_attending";
