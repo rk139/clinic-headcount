@@ -605,6 +605,28 @@ export default function HeadcountBoard() {
       marginRight: 8,
       marginBottom: 8,
     } as React.CSSProperties,
+
+    pillBtn: (variant: "primary" | "neutral" | "danger" | "success", disabled: boolean) =>
+        ({
+          padding: "6px 10px",
+          borderRadius: 10,
+          border: "1px solid #2a2a33",
+          background:
+            variant === "success"
+              ? "#22c55e"
+              : variant === "primary"
+              ? "#3b82f6"
+              : variant === "danger"
+              ? "#ef4444"
+              : "transparent",
+          color:
+            variant === "success" || variant === "primary" || variant === "danger"
+              ? "#0b0b0f"
+              : "#d4d4db",
+          fontWeight: 700,
+          cursor: disabled ? "not-allowed" : "pointer",
+          opacity: disabled ? 0.55 : 1,
+        }) as React.CSSProperties,
   };
 
   return (
@@ -618,9 +640,6 @@ export default function HeadcountBoard() {
         <button onClick={load} style={styles.refreshBtn}>
           Refresh
         </button>
-        <span style={styles.subText}>
-          Tip: edit counts → Save (persists to database)
-        </span>
       </div>
 
       {error ? (
@@ -755,30 +774,32 @@ export default function HeadcountBoard() {
                         <button
                           type= "button"
                           onClick={() => generatePairings(s.id)}
-                          disabled={isFinal}
-                          style={styles.namesBtn}>
+                          disabled={isFinal || yesNames.length < 2}
+                          style={styles.pillBtn("success", isFinal || yesNames.length < 2)}>
                             Generate Pairings
                           </button>
 
                         <button
                           type="button"
-                          onClick={() => clearPairings(s.id)}
+                          onClick={() => {if (window.confirm("Clear all pairings for this session?")) clearPairings(s.id);}}
                           disabled={isFinal||!pairings}
-                          style={styles.namesBtn}>
+                          style={styles.pillBtn("neutral", isFinal || !pairings)}>
                             Clear Pairings
                         </button>
 
                         <button
                          type = "button"
                          onClick={() => finalizeSession(s.id)}
-                         style={styles.namesBtn}>
-                            Finalize
+                         disabled={isFinal || !pairings || pairings.length === 0}
+                         style={styles.pillBtn("neutral", isFinal || !pairings || pairings.length === 0)}>
+                            {isFinal ? "Finalized ✓" : "Finalize"}
                          </button>
                         
                         <button
                          type= "button"
                          onClick={() => unlockSession(s.id)}
-                         style={styles.namesBtn}>
+                         disabled={!isFinal}
+                         style={styles.pillBtn("danger", !isFinal)}>
                             Unlock
                          </button>
 
@@ -790,57 +811,108 @@ export default function HeadcountBoard() {
 
                     {pairings ? (
                         pairings.length ? (
-                            <DndContext
-                            sensors={sensors}
-                            collisionDetection={closestCenter}
-                            onDragOver={isFinal ? undefined : handleDragOver(s.id)}
-                            onDragEnd={isFinal ? undefined: handleDragEnd(s.id)}
-                            >
-                            <div style={{ marginTop: 10 }}>
-                            {pairings.map((court, idx) => {
-                              const cId = courtId(s.id, idx);
+                        <DndContext
+                          sensors={sensors}
+                          collisionDetection={closestCenter}
+                          onDragOver={isFinal ? undefined : handleDragOver(s.id)}
+                          onDragEnd={isFinal ? undefined : handleDragEnd(s.id)}
+                        >
+                        <div style={{ marginTop: 12 }}>
+                    <div
+                      style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      marginBottom: 10,
+                      padding: "8px 10px",
+                      borderRadius: 12,
+                      border: "1px solid #2a2a33",
+                      background: isFinal ? "#0b1220" : "#0b0b0f"
+                    }}
+                    >
+                      <div style={{ fontWeight: 900, fontSize: 13, letterSpacing: 0.3 }}>
+                        Court Assignments
+                       </div>
 
-                              return (
-                                <div
-                                  key={cId}
-                                  id={cId}
-                                  style={{ marginBottom: 10 }}
-                                >
-                                  <div
-                                    style={{
-                                      fontSize: 12,
-                                      fontWeight: 700,
-                                      marginBottom: 6,
-                                    }}
-                                  >
-                                    Court {idx + 1} {isFinal && "(Finalized)"}
-                                  </div>
-
-                                  <SortableContext
-                                    items={court}
-                                    strategy={verticalListSortingStrategy}
-                                  >
-                                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                                      {court.map((n) => (
-                                        <DraggableKidPill
-                                          key={n}
-                                          id={n}
-                                          disabled={isFinal}
-                                    />
-                                  ))}
-                                </div>
-                              </SortableContext>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </DndContext>
-                  ) : (
-                    <div style={{ marginTop: 10, ...styles.subText }}>
-                      Not enough kids to pair
+                    {isFinal ? (
+                        <span
+                        style={{
+                            fontSize: 12,
+                            padding: "4px 8px",
+                            borderRadius: 999,
+                            border: "1px solid #2a2a33",
+                            background: "#0b0b0f",
+                            color: "#d4d4db",
+                            fontWeight: 800,
+                        }}
+                        >
+                        🔒 Finalized
+                        </span>
+                    ) : null}
                     </div>
-                  )
-                ) : null}
+
+                    <div
+                    style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+                        gap: 10,
+                        opacity: isFinal ? 0.92 : 1,
+                        filter: isFinal ? "saturate(0.95)" : undefined,
+                        transition: "opacity 160ms ease",
+                    }}
+                    >
+                    {pairings.map((court, idx) => {
+                        const cId = courtId(s.id, idx);
+
+                        return (
+                        <div
+                            key={cId}
+                            id={cId}
+                            style={{
+                            border: "1px solid #2a2a33",
+                            borderRadius: 14,
+                            padding: 12,
+                            background: "#0b0b0f",
+                            }}
+                        >
+                            <div
+                            style={{
+                                display: "flex",
+                                justifyContent: "space-between",
+                                alignItems: "center",
+                                marginBottom: 10,
+                            }}
+                            >
+                            <div style={{ fontSize: 13, fontWeight: 800 }}>
+                                Court {idx + 1}
+                            </div>
+                            <div style={{ fontSize: 12, color: "#a1a1aa" }}>
+                                {court.length} kid{court.length === 1 ? "" : "s"}
+                            </div>
+                            </div>
+
+                            <SortableContext
+                            items={court}
+                            strategy={verticalListSortingStrategy}
+                            >
+                            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                {court.map((n) => (
+                                <DraggableKidPill key={n} id={n} disabled={isFinal} />
+                                ))}
+                            </div>
+                            </SortableContext>
+                        </div>
+                        );
+                    })}
+                    </div>
+                </div>
+                </DndContext>
+            ) : (
+                <div style={{ marginTop: 10, ...styles.subText }}>
+                Not enough kids to pair
+                </div>
+            )
+            ) : null}
 
                     {isNamesOpen ? (
                       <div style={styles.namesPanel}>
