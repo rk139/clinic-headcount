@@ -26,6 +26,7 @@ model ClinicSession {
   singleDateCount  Int @default(0)
 
   responseLink ResponseLink?
+  attendances SessionAttendance[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -71,6 +72,29 @@ model SessionResponse {
   @@index([createdAt])
 }
 
+model SessionAttendance {
+  id String @id @default(cuid())
+
+  sessionId String
+  session   ClinicSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  // display name
+  kidName String
+
+  // unique internal key to distinguish duplicates like "Raj"
+  kidKey String
+
+  // optional, helpful for debugging
+  familyCode String?
+
+  attended Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([sessionId, kidKey])
+  @@index([sessionId])
+}
 
 
 
