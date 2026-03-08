@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import React, { useEffect, useMemo, useState } from "react";
 
 type ClinicSession = {
@@ -118,7 +119,20 @@ export default function HistoryPage() {
       return { ...base, background: "#1b1b22", color: "white" };
     };
 
-    return { card, muted, chip, pillBtn };
+    const navLinkBtn: React.CSSProperties = {
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center",
+      padding: "10px 12px",
+      borderRadius: 12,
+      border: "1px solid #2a2a33",
+      background: "#1b1b22",
+      color: "white",
+      fontWeight: 800,
+      textDecoration: "none",
+    };
+
+    return { card, muted, chip, pillBtn, navLinkBtn };
   }, []);
 
   async function loadSessions() {
@@ -282,7 +296,6 @@ export default function HistoryPage() {
         [sessionId]: `Saved at ${new Date().toLocaleTimeString()}`,
       }));
 
-      // auto-clear after a bit
       window.setTimeout(() => {
         setSavedMsg((p) => ({ ...p, [sessionId]: "" }));
       }, 3500);
@@ -293,12 +306,29 @@ export default function HistoryPage() {
 
   return (
     <main style={{ padding: 18, maxWidth: 1100, margin: "0 auto" }}>
-      <h1 style={{ fontSize: 34, marginBottom: 6, letterSpacing: -0.3 }}>
-        Session History
-      </h1>
-      <p style={{ marginBottom: 16, ...styles.muted }}>
-        Expand a session → toggle actual attendance → Save.
-      </p>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "flex-start",
+          gap: 12,
+          marginBottom: 6,
+          flexWrap: "wrap",
+        }}
+      >
+        <div>
+          <h1 style={{ fontSize: 34, marginBottom: 6, letterSpacing: -0.3 }}>
+            Session History
+          </h1>
+          <p style={{ marginBottom: 16, ...styles.muted }}>
+            Expand a session → toggle actual attendance → Save.
+          </p>
+        </div>
+
+        <Link href="/headcount" style={styles.navLinkBtn}>
+          Headcount
+        </Link>
+      </div>
 
       {pageError && (
         <div

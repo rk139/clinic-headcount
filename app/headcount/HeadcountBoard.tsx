@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 // drag n drop imports
@@ -122,13 +123,11 @@ function cleanName(n: string) {
 
 // ✅ display helpers (only show family hint when name collides)
 function baseNameFromLabel(label: string) {
-  // "Jack (Smith)" -> "Jack"
   const idx = label.indexOf(" (");
   return (idx >= 0 ? label.slice(0, idx) : label).trim();
 }
 
 function computeDisplayLabelMap(kids: Kid[]) {
-  // count base-name collisions
   const counts = new Map<string, number>();
   for (const k of kids) {
     const base = baseNameFromLabel(k.label).toLowerCase();
@@ -136,7 +135,6 @@ function computeDisplayLabelMap(kids: Kid[]) {
     counts.set(base, (counts.get(base) ?? 0) + 1);
   }
 
-  // if base-name appears once => show base only; else show full label
   const idToDisplay = new Map<string, string>();
   for (const k of kids) {
     const base = baseNameFromLabel(k.label);
@@ -201,7 +199,6 @@ export default function HeadcountBoard() {
   );
 
   // For session pairings
-  // NOTE: each string is a Kid.key (ex: "SMITH12:jack"), NOT display label
   const [pairingsBySessionId, setPairingsBySessionId] = useState<
     Record<string, string[][]>
   >({});
@@ -218,8 +215,8 @@ export default function HeadcountBoard() {
     }),
     useSensor(TouchSensor, {
       activationConstraint: {
-        delay: 150, // press-and-hold a moment
-        tolerance: 8, // allow slight finger movement
+        delay: 150,
+        tolerance: 8,
       },
     })
   );
@@ -263,13 +260,12 @@ export default function HeadcountBoard() {
       setSessions(parsed as ClinicSession[]);
     } catch (e: any) {
       setError(e?.message ?? "Failed to load sessions");
-      setSessions([]); // keep UI stable
+      setSessions([]);
     }
   };
 
   useEffect(() => {
     load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const byDate = useMemo(() => {
@@ -349,13 +345,11 @@ export default function HeadcountBoard() {
     setCopiedSessionId(sessionId);
     setTimeout(() => setCopiedSessionId(null), 900);
 
-    // Hide link locally after copy (DB unchanged)
     setSessions((prev) =>
       prev.map((s) => (s.id === sessionId ? { ...s, responseLink: null } : s))
     );
   };
 
-  // Step 6: close link (manual)
   const closeLink = async (sessionId: string) => {
     setError("");
     setCloseBusyId(sessionId);
@@ -376,7 +370,6 @@ export default function HeadcountBoard() {
     }
   };
 
-  // Step 6: reopen link (manual)
   const reopenLink = async (sessionId: string) => {
     setError("");
     setCloseBusyId(sessionId);
@@ -397,17 +390,14 @@ export default function HeadcountBoard() {
     }
   };
 
-  // fallback key if API didn't send kid keys (dev safety)
   function normFallbackKey(name: string) {
     return `name:${cleanName(name).toLowerCase()}`;
   }
 
-  // Pairings Handlers
   const generatePairings = (sessionId: string, groupSize = 4) => {
     const s = sessions.find((x) => x.id === sessionId);
     if (!s) return;
 
-    // Prefer new keyed kids. Fallback to old names for safety.
     const yesKidsRaw: Kid[] =
       s.attendingKids && Array.isArray(s.attendingKids)
         ? s.attendingKids
@@ -437,11 +427,9 @@ export default function HeadcountBoard() {
     });
   };
 
-  // pin helper functions
-  const COACH_PIN = "1234"; // TEMP PIN
+  const COACH_PIN = "1234";
   const requirePin = () => (window.prompt("Enter coach PIN:") ?? "").trim();
 
-  // pin handlers
   const finalizeSession = (sessionId: string) => {
     const pin = requirePin();
     if (pin !== COACH_PIN) return alert("WRONG PIN");
@@ -454,13 +442,11 @@ export default function HeadcountBoard() {
     setFinalizedSessionId((prev) => ({ ...prev, [sessionId]: false }));
   };
 
-  // drag n drop functions
   function courtId(sessionId: string, courtIndex: number) {
     return `court:${sessionId}:${courtIndex}`;
   }
 
   function parseCourtId(id: string) {
-    // "court:SESSION:INDEX"
     const [prefix, sessionId, idx] = id.split(":");
     if (prefix !== "court") return null;
     const courtIndex = Number(idx);
@@ -549,6 +535,12 @@ export default function HeadcountBoard() {
       gap: 12,
       marginBottom: 18,
     } as React.CSSProperties,
+    topLeftActions: {
+      display: "flex",
+      gap: 8,
+      alignItems: "center",
+      flexWrap: "wrap",
+    } as React.CSSProperties,
     refreshBtn: {
       padding: "6px 10px",
       borderRadius: 10,
@@ -556,6 +548,22 @@ export default function HeadcountBoard() {
       background: "transparent",
       color: "#d4d4db",
       cursor: "pointer",
+      textDecoration: "none",
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center",
+    } as React.CSSProperties,
+    navLinkBtn: {
+      padding: "6px 10px",
+      borderRadius: 10,
+      border: "1px solid #2a2a33",
+      background: "transparent",
+      color: "#d4d4db",
+      cursor: "pointer",
+      textDecoration: "none",
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center",
     } as React.CSSProperties,
     dateHeader: {
       fontSize: 18,
@@ -694,9 +702,15 @@ export default function HeadcountBoard() {
       </p>
 
       <div style={styles.topRow}>
-        <button onClick={load} style={styles.refreshBtn}>
-          Refresh
-        </button>
+        <div style={styles.topLeftActions}>
+          <button onClick={load} style={styles.refreshBtn}>
+            Refresh
+          </button>
+
+          <Link href="/history" style={styles.navLinkBtn}>
+            History
+          </Link>
+        </div>
       </div>
 
       {error ? (
@@ -721,7 +735,6 @@ export default function HeadcountBoard() {
                 const yesKidsObj = uniqueKidsPreserveOrder(s.attendingKids ?? []);
                 const noKidsObj = uniqueKidsPreserveOrder(s.notAttendingKids ?? []);
 
-                // ✅ build display labels: show family hint only when duplicates exist
                 const { idToDisplay: yesIdToDisplay } =
                   computeDisplayLabelMap(yesKidsObj);
                 const { idToDisplay: noIdToDisplay } =
@@ -734,7 +747,6 @@ export default function HeadcountBoard() {
                   (k) => noIdToDisplay.get(k.key) ?? k.label
                 );
 
-                // ✅ this is what DnD pills use (ID -> visible text)
                 const kidLabelById = yesIdToDisplay;
 
                 const pairings = pairingsBySessionId[s.id];
