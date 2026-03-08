@@ -1,3 +1,4 @@
+// app/api/sessions/route.ts
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 
@@ -17,6 +18,24 @@ function normalizeKidNames(value: unknown): string[] {
     .map((n) => n.trim())
     .filter((n) => n.length > 0);
 }
+
+//  NEW helpers
+function normName(n: string) {
+  return n.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function normFamilyCode(fc: string | null) {
+  return (fc ?? "").trim().toUpperCase();
+}
+
+function prettyFamily(fc: string) {
+    const base = fc.replace(/\d{2}$/, ""); // remove last two digits
+    if (!base) return fc;
+    return base.charAt(0).toUpperCase() + base.slice(1).toLowerCase();
+  }
+
+type Kid = { key: string; label: string };
+
 
 export async function GET() {
   try {
@@ -42,7 +61,7 @@ export async function GET() {
             closedAt: true,
             responses: {
               select: {
-                familyCode: true, // ✅ Phase 1C: needed for dedupe
+                familyCode: true, //  Phase 1C: needed for dedupe
                 choice: true,
                 createdAt: true,
                 kidNames: true,
@@ -58,7 +77,7 @@ export async function GET() {
     const withTotals = sessions.map((s: Session) => {
       const responses = s.responseLink?.responses ?? [];
 
-      // ✅ Phase 1C: keep only the latest response per familyCode
+      //  Phase 1C: keep only the latest response per familyCode
       const latestByFamily = new Map<
         string,
         {
@@ -72,7 +91,7 @@ export async function GET() {
       let lastResponseAt: string | null = null;
 
       for (const r of responses) {
-        const key = (r.familyCode ?? "").trim().toUpperCase();
+        const key = normFamilyCode(r.familyCode);
         if (!key) continue;
 
         const current = latestByFamily.get(key);
@@ -92,21 +111,42 @@ export async function GET() {
       let attendingKidsCount = 0;
       let notAttendingKidsCount = 0;
 
+      // Old fields (keep for backward compatibility)
       const attendingKidNames: string[] = [];
       const notAttendingKidNames: string[] = [];
 
-      // ✅ Count only latest response per familyCode
+      //  NEW fields: include familyCode-based kid keys + display labels
+      const attendingKids: Kid[] = [];
+      const notAttendingKids: Kid[] = [];
+
+      //  Count only latest response per familyCode
       for (const r of latestResponses) {
         const names = normalizeKidNames(r.kidNames);
+        const fc = normFamilyCode(r.familyCode);
+        if (!fc) continue;
 
         if (r.choice === "attending") {
           attendingCount += 1;
           attendingKidsCount += names.length;
-          attendingKidNames.push(...names);
+
+          for (const kidName of names) {
+            const key = `${fc}:${normName(kidName)}`;
+            const label = `${kidName.trim()} (${prettyFamily(fc)})`;
+
+            attendingKidNames.push(kidName.trim());
+            attendingKids.push({ key, label });
+          }
         } else if (r.choice === "not_attending") {
           notAttendingCount += 1;
           notAttendingKidsCount += names.length;
-          notAttendingKidNames.push(...names);
+
+          for (const kidName of names) {
+            const key = `${fc}:${normName(kidName)}`;
+            const label = `${kidName.trim()} (${prettyFamily(fc)})`;
+
+            notAttendingKidNames.push(kidName.trim());
+            notAttendingKids.push({ key, label });
+          }
         }
       }
 
@@ -125,10 +165,18 @@ export async function GET() {
 
         attendingCount,
         notAttendingCount,
+
         attendingKidsCount,
         notAttendingKidsCount,
+
+        // old arrays (still returned)
         attendingKidNames,
         notAttendingKidNames,
+
+        //  new arrays (use these on /headcount)
+        attendingKids,
+        notAttendingKids,
+
         lastResponseAt,
       };
     });

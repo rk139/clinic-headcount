@@ -2,26 +2,28 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-//drag n drop imports 
+// drag n drop imports
 import {
-    DndContext,
-    PointerSensor,
-    TouchSensor,
-    closestCenter,
-    useSensor,
-    useSensors,
-    type DragEndEvent,
-    type DragOverEvent,
-  } from "@dnd-kit/core";
-  
-  import {
-    SortableContext,
-    useSortable,
-    arrayMove,
-    verticalListSortingStrategy,
-  } from "@dnd-kit/sortable";
-  
-  import { CSS } from "@dnd-kit/utilities";
+  DndContext,
+  PointerSensor,
+  TouchSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragOverEvent,
+} from "@dnd-kit/core";
+
+import {
+  SortableContext,
+  useSortable,
+  arrayMove,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+
+import { CSS } from "@dnd-kit/utilities";
+
+type Kid = { key: string; label: string };
 
 type ClinicSession = {
   id: string;
@@ -47,6 +49,10 @@ type ClinicSession = {
   notAttendingKidsCount?: number;
   attendingKidNames?: string[];
   notAttendingKidNames?: string[];
+
+  // ✅ NEW: key+label kids (from /api/sessions)
+  attendingKids?: Kid[];
+  notAttendingKids?: Kid[];
 
   lastResponseAt?: string | null;
 };
@@ -74,70 +80,109 @@ function uniquePreserveOrder(names: string[]) {
   return out;
 }
 
+function uniqueKidsPreserveOrder(kids: Kid[]) {
+  const seen = new Set<string>();
+  const out: Kid[] = [];
+  for (const k of kids) {
+    const key = k.key.trim().toLowerCase();
+    if (!key) continue;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(k);
+  }
+  return out;
+}
+
 function safeSnippet(s: string, max = 400) {
   const t = s.replace(/\s+/g, " ").trim();
   return t.length > max ? `${t.slice(0, max)}…` : t;
 }
 
-//pairings helper functions 
-
-function shuffle(names: string[]){
-    const arr = [...names];
-    for (let i = arr.length -1; i > 0; i--){
-        const j = Math.floor(Math.random() * (i + 1));
-        [arr[i], arr[j]] = [arr[j], arr[i]];
-    }
-    return arr;
+// pairings helper functions
+function shuffle(names: string[]) {
+  const arr = [...names];
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
 }
 
 function chunk(names: string[], groupSize: number) {
-    const out: string[][] = [];
-    for (let i = 0; i < names.length; i+= groupSize) {
-        out.push(names.slice(i,i + groupSize));
-    }
-    return out;
+  const out: string[][] = [];
+  for (let i = 0; i < names.length; i += groupSize) {
+    out.push(names.slice(i, i + groupSize));
+  }
+  return out;
 }
 
 function cleanName(n: string) {
-    return n.replace(/\s+/g, " ").trim();
+  return n.replace(/\s+/g, " ").trim();
 }
 
-  
-  
-  function DraggableKidPill({
-    id,
-    disabled,
-  }: {
-    id: string;
-    disabled: boolean;
-  }) {
-    const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
-      useSortable({ id, disabled });
-  
-    const style: React.CSSProperties = {
-      padding: "4px 8px",
-      borderRadius: 999,
-      border: "1px solid #2a2a33",
-      background: "#0f0f16",
-      color: "#eaeaf0",
-      cursor: disabled ? "not-allowed" : "grab",
-      opacity: disabled ? 0.6 : 1,
-      boxShadow: isDragging ? "0 6px 18px rgba(0,0,0,0.12)" : undefined,
-      transform: CSS.Transform.toString(transform),
-      transition,
-      userSelect: "none",
-      touchAction: "none",
-      display: "inline-flex",
-      marginRight: 8,
-      marginBottom: 8,
-    };
-  
-    return (
-      <span ref={setNodeRef} style={style} {...attributes} {...listeners}>
-        {id}
-      </span>
-    );
+// ✅ display helpers (only show family hint when name collides)
+function baseNameFromLabel(label: string) {
+  // "Jack (Smith)" -> "Jack"
+  const idx = label.indexOf(" (");
+  return (idx >= 0 ? label.slice(0, idx) : label).trim();
+}
+
+function computeDisplayLabelMap(kids: Kid[]) {
+  // count base-name collisions
+  const counts = new Map<string, number>();
+  for (const k of kids) {
+    const base = baseNameFromLabel(k.label).toLowerCase();
+    if (!base) continue;
+    counts.set(base, (counts.get(base) ?? 0) + 1);
   }
+
+  // if base-name appears once => show base only; else show full label
+  const idToDisplay = new Map<string, string>();
+  for (const k of kids) {
+    const base = baseNameFromLabel(k.label);
+    const c = counts.get(base.toLowerCase()) ?? 0;
+    idToDisplay.set(k.key, c <= 1 ? base : k.label);
+  }
+
+  return { idToDisplay, counts };
+}
+
+function DraggableKidPill({
+  id,
+  label,
+  disabled,
+}: {
+  id: string;
+  label: string;
+  disabled: boolean;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id, disabled });
+
+  const style: React.CSSProperties = {
+    padding: "4px 8px",
+    borderRadius: 999,
+    border: "1px solid #2a2a33",
+    background: "#0f0f16",
+    color: "#eaeaf0",
+    cursor: disabled ? "not-allowed" : "grab",
+    opacity: disabled ? 0.6 : 1,
+    boxShadow: isDragging ? "0 6px 18px rgba(0,0,0,0.12)" : undefined,
+    transform: CSS.Transform.toString(transform),
+    transition,
+    userSelect: "none",
+    touchAction: "none",
+    display: "inline-flex",
+    marginRight: 8,
+    marginBottom: 8,
+  };
+
+  return (
+    <span ref={setNodeRef} style={style} {...attributes} {...listeners}>
+      {label}
+    </span>
+  );
+}
 
 export default function HeadcountBoard() {
   const [sessions, setSessions] = useState<ClinicSession[]>([]);
@@ -155,21 +200,26 @@ export default function HeadcountBoard() {
     {}
   );
 
-  //For session pairings 
-  const [pairingsBySessionId, setPairingsBySessionId] = useState<Record<string, string[][]>>({});
+  // For session pairings
+  // NOTE: each string is a Kid.key (ex: "SMITH12:jack"), NOT display label
+  const [pairingsBySessionId, setPairingsBySessionId] = useState<
+    Record<string, string[][]>
+  >({});
 
-  //finalized pairing state 
-  const [finalizedBySessionId, setFinalizedSessionId] = useState<Record<string, boolean>>({});
+  // finalized pairing state
+  const [finalizedBySessionId, setFinalizedSessionId] = useState<
+    Record<string, boolean>
+  >({});
 
-  //drag n drop 
+  // drag n drop
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: { distance: 6 },
     }),
     useSensor(TouchSensor, {
       activationConstraint: {
-        delay: 150,      // press-and-hold a moment
-        tolerance: 8,    // allow slight finger movement
+        delay: 150, // press-and-hold a moment
+        tolerance: 8, // allow slight finger movement
       },
     })
   );
@@ -180,7 +230,6 @@ export default function HeadcountBoard() {
     try {
       const res = await fetch("/api/sessions", { cache: "no-store" });
 
-      // If server returned an error (500/404/etc), don't try res.json() blindly.
       if (!res.ok) {
         const text = await res.text();
         throw new Error(
@@ -188,7 +237,6 @@ export default function HeadcountBoard() {
         );
       }
 
-      // Even if res.ok, still protect against invalid JSON.
       const raw = await res.text();
       let parsed: unknown;
       try {
@@ -199,7 +247,6 @@ export default function HeadcountBoard() {
         );
       }
 
-      // If API returned { error: "..." }, show it cleanly.
       if (
         parsed &&
         typeof parsed === "object" &&
@@ -350,60 +397,68 @@ export default function HeadcountBoard() {
     }
   };
 
-  // Pairings Handelers
+  // fallback key if API didn't send kid keys (dev safety)
+  function normFallbackKey(name: string) {
+    return `name:${cleanName(name).toLowerCase()}`;
+  }
 
+  // Pairings Handlers
   const generatePairings = (sessionId: string, groupSize = 4) => {
     const s = sessions.find((x) => x.id === sessionId);
-    if(!s) return;
+    if (!s) return;
 
-    const raw = s.attendingKidNames ?? [];
-    const cleaned = raw.map(cleanName).filter(Boolean);
+    // Prefer new keyed kids. Fallback to old names for safety.
+    const yesKidsRaw: Kid[] =
+      s.attendingKids && Array.isArray(s.attendingKids)
+        ? s.attendingKids
+        : uniquePreserveOrder((s.attendingKidNames ?? []).map(cleanName))
+            .filter(Boolean)
+            .map((name) => ({ key: normFallbackKey(name), label: name }));
 
-    //dedupe while preserving order (you already do this elsewhere)
-    const deduped = uniquePreserveOrder(cleaned);
+    const yesKids = uniqueKidsPreserveOrder(yesKidsRaw);
+    const kidIds = yesKids.map((k) => k.key);
 
-    if (deduped.length < 2){
-        setPairingsBySessionId((prev) => ({...prev,[sessionId]: []}));
-        return;
+    if (kidIds.length < 2) {
+      setPairingsBySessionId((prev) => ({ ...prev, [sessionId]: [] }));
+      return;
     }
 
-    const shuffled = shuffle(deduped);
+    const shuffled = shuffle(kidIds);
     const courts = chunk(shuffled, groupSize);
 
-    setPairingsBySessionId((prev) => ({...prev, [sessionId]: courts}));
+    setPairingsBySessionId((prev) => ({ ...prev, [sessionId]: courts }));
   };
 
   const clearPairings = (sessionId: string) => {
     setPairingsBySessionId((prev) => {
-        const copy = {...prev};
-        delete copy[sessionId];
-        return copy;
+      const copy = { ...prev };
+      delete copy[sessionId];
+      return copy;
     });
   };
 
-  //pin helper functions
-  const COACH_PIN = "1234"; //TEMP PIN
+  // pin helper functions
+  const COACH_PIN = "1234"; // TEMP PIN
   const requirePin = () => (window.prompt("Enter coach PIN:") ?? "").trim();
 
-  //pin handelers 
+  // pin handlers
   const finalizeSession = (sessionId: string) => {
     const pin = requirePin();
-    if(pin !== COACH_PIN) return alert("WRONG PIN");
-    setFinalizedSessionId((prev) => ({...prev, [sessionId]: true}))
+    if (pin !== COACH_PIN) return alert("WRONG PIN");
+    setFinalizedSessionId((prev) => ({ ...prev, [sessionId]: true }));
   };
 
   const unlockSession = (sessionId: string) => {
     const pin = requirePin();
-    if(pin !== COACH_PIN) return alert("WRONG PIN");
-    setFinalizedSessionId((prev) => ({...prev, [sessionId]: false}));
+    if (pin !== COACH_PIN) return alert("WRONG PIN");
+    setFinalizedSessionId((prev) => ({ ...prev, [sessionId]: false }));
   };
 
-  //frag n drop functions 
-
+  // drag n drop functions
   function courtId(sessionId: string, courtIndex: number) {
     return `court:${sessionId}:${courtIndex}`;
   }
-  
+
   function parseCourtId(id: string) {
     // "court:SESSION:INDEX"
     const [prefix, sessionId, idx] = id.split(":");
@@ -412,17 +467,15 @@ export default function HeadcountBoard() {
     if (!sessionId || Number.isNaN(courtIndex)) return null;
     return { sessionId, courtIndex };
   }
-  
-  function findCourtForKid(pairings: string[][], kidName: string) {
+
+  function findCourtForKid(pairings: string[][], kidId: string) {
     for (let i = 0; i < pairings.length; i++) {
-      if (pairings[i]?.includes(kidName)) return i;
+      if (pairings[i]?.includes(kidId)) return i;
     }
     return -1;
   }
 
-  const handleDragOver =
-  (sessionId: string) =>
-  (e: DragOverEvent) => {
+  const handleDragOver = (sessionId: string) => (e: DragOverEvent) => {
     const activeId = String(e.active.id);
     const overId = e.over?.id ? String(e.over.id) : null;
     if (!overId) return;
@@ -453,9 +506,7 @@ export default function HeadcountBoard() {
     });
   };
 
-  const handleDragEnd =
-  (sessionId: string) =>
-  (e: DragEndEvent) => {
+  const handleDragEnd = (sessionId: string) => (e: DragEndEvent) => {
     const activeId = String(e.active.id);
     const overId = e.over?.id ? String(e.over.id) : null;
     if (!overId) return;
@@ -472,7 +523,8 @@ export default function HeadcountBoard() {
 
       const overIdx = current[courtIdx].indexOf(overId);
       const activeIdx = current[courtIdx].indexOf(activeId);
-      if (activeIdx === -1 || overIdx === -1 || activeIdx === overIdx) return prev;
+      if (activeIdx === -1 || overIdx === -1 || activeIdx === overIdx)
+        return prev;
 
       const next = current.map((c) => [...c]);
       next[courtIdx] = arrayMove(next[courtIdx], activeIdx, overIdx);
@@ -606,27 +658,32 @@ export default function HeadcountBoard() {
       marginBottom: 8,
     } as React.CSSProperties,
 
-    pillBtn: (variant: "primary" | "neutral" | "danger" | "success", disabled: boolean) =>
-        ({
-          padding: "6px 10px",
-          borderRadius: 10,
-          border: "1px solid #2a2a33",
-          background:
-            variant === "success"
-              ? "#22c55e"
-              : variant === "primary"
-              ? "#3b82f6"
-              : variant === "danger"
-              ? "#ef4444"
-              : "transparent",
-          color:
-            variant === "success" || variant === "primary" || variant === "danger"
-              ? "#0b0b0f"
-              : "#d4d4db",
-          fontWeight: 700,
-          cursor: disabled ? "not-allowed" : "pointer",
-          opacity: disabled ? 0.55 : 1,
-        }) as React.CSSProperties,
+    pillBtn: (
+      variant: "primary" | "neutral" | "danger" | "success",
+      disabled: boolean
+    ) =>
+      ({
+        padding: "6px 10px",
+        borderRadius: 10,
+        border: "1px solid #2a2a33",
+        background:
+          variant === "success"
+            ? "#22c55e"
+            : variant === "primary"
+            ? "#3b82f6"
+            : variant === "danger"
+            ? "#ef4444"
+            : "transparent",
+        color:
+          variant === "success" ||
+          variant === "primary" ||
+          variant === "danger"
+            ? "#0b0b0f"
+            : "#d4d4db",
+        fontWeight: 700,
+        cursor: disabled ? "not-allowed" : "pointer",
+        opacity: disabled ? 0.55 : 1,
+      }) as React.CSSProperties,
   };
 
   return (
@@ -661,10 +718,27 @@ export default function HeadcountBoard() {
                 const isClosed = !!s.responseLink?.closedAt;
                 const busy = linkBusyId === s.id || closeBusyId === s.id;
 
-                const yesNames = uniquePreserveOrder(s.attendingKidNames ?? []);
+                const yesKidsObj = uniqueKidsPreserveOrder(s.attendingKids ?? []);
+                const noKidsObj = uniqueKidsPreserveOrder(s.notAttendingKids ?? []);
+
+                // ✅ build display labels: show family hint only when duplicates exist
+                const { idToDisplay: yesIdToDisplay } =
+                  computeDisplayLabelMap(yesKidsObj);
+                const { idToDisplay: noIdToDisplay } =
+                  computeDisplayLabelMap(noKidsObj);
+
+                const yesNames = yesKidsObj.map(
+                  (k) => yesIdToDisplay.get(k.key) ?? k.label
+                );
+                const noNames = noKidsObj.map(
+                  (k) => noIdToDisplay.get(k.key) ?? k.label
+                );
+
+                // ✅ this is what DnD pills use (ID -> visible text)
+                const kidLabelById = yesIdToDisplay;
+
                 const pairings = pairingsBySessionId[s.id];
                 const isFinal = !!finalizedBySessionId[s.id];
-                const noNames = uniquePreserveOrder(s.notAttendingKidNames ?? []);
 
                 const yesKids = s.attendingKidsCount ?? yesNames.length;
                 const noKids = s.notAttendingKidsCount ?? noNames.length;
@@ -751,7 +825,9 @@ export default function HeadcountBoard() {
                             </span>
                             <button
                               type="button"
-                              onClick={() => copyLink(s.responseLink!.token, s.id)}
+                              onClick={() =>
+                                copyLink(s.responseLink!.token, s.id)
+                              }
                               disabled={busy}
                               style={styles.linkBtn(busy)}
                             >
@@ -770,149 +846,201 @@ export default function HeadcountBoard() {
                       </span>
                     </div>
 
-                    <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
-                        <button
-                          type= "button"
-                          onClick={() => generatePairings(s.id)}
-                          disabled={isFinal || yesNames.length < 2}
-                          style={styles.pillBtn("success", isFinal || yesNames.length < 2)}>
-                            Generate Pairings
-                          </button>
+                    <div
+                      style={{
+                        display: "flex",
+                        gap: 8,
+                        marginTop: 10,
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => generatePairings(s.id)}
+                        disabled={isFinal || yesNames.length < 2}
+                        style={styles.pillBtn(
+                          "success",
+                          isFinal || yesNames.length < 2
+                        )}
+                      >
+                        Generate Pairings
+                      </button>
 
-                        <button
-                          type="button"
-                          onClick={() => {if (window.confirm("Clear all pairings for this session?")) clearPairings(s.id);}}
-                          disabled={isFinal||!pairings}
-                          style={styles.pillBtn("neutral", isFinal || !pairings)}>
-                            Clear Pairings
-                        </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (
+                            window.confirm(
+                              "Clear all pairings for this session?"
+                            )
+                          )
+                            clearPairings(s.id);
+                        }}
+                        disabled={isFinal || !pairings}
+                        style={styles.pillBtn("neutral", isFinal || !pairings)}
+                      >
+                        Clear Pairings
+                      </button>
 
-                        <button
-                         type = "button"
-                         onClick={() => finalizeSession(s.id)}
-                         disabled={isFinal || !pairings || pairings.length === 0}
-                         style={styles.pillBtn("neutral", isFinal || !pairings || pairings.length === 0)}>
-                            {isFinal ? "Finalized ✓" : "Finalize"}
-                         </button>
-                        
-                        <button
-                         type= "button"
-                         onClick={() => unlockSession(s.id)}
-                         disabled={!isFinal}
-                         style={styles.pillBtn("danger", !isFinal)}>
-                            Unlock
-                         </button>
+                      <button
+                        type="button"
+                        onClick={() => finalizeSession(s.id)}
+                        disabled={isFinal || !pairings || pairings.length === 0}
+                        style={styles.pillBtn(
+                          "neutral",
+                          isFinal || !pairings || pairings.length === 0
+                        )}
+                      >
+                        {isFinal ? "Finalized ✓" : "Finalize"}
+                      </button>
 
-                        {yesNames.length < 2 ? (
-                            <span style={styles.subText}>Not enough kids to pair</span>
-                        
-                        ) : null}
-                    </div> 
+                      <button
+                        type="button"
+                        onClick={() => unlockSession(s.id)}
+                        disabled={!isFinal}
+                        style={styles.pillBtn("danger", !isFinal)}
+                      >
+                        Unlock
+                      </button>
+
+                      {yesNames.length < 2 ? (
+                        <span style={styles.subText}>Not enough kids to pair</span>
+                      ) : null}
+                    </div>
 
                     {pairings ? (
-                        pairings.length ? (
+                      pairings.length ? (
                         <DndContext
                           sensors={sensors}
                           collisionDetection={closestCenter}
                           onDragOver={isFinal ? undefined : handleDragOver(s.id)}
                           onDragEnd={isFinal ? undefined : handleDragEnd(s.id)}
                         >
-                        <div style={{ marginTop: 12 }}>
-                    <div
-                      style={{
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      marginBottom: 10,
-                      padding: "8px 10px",
-                      borderRadius: 12,
-                      border: "1px solid #2a2a33",
-                      background: isFinal ? "#0b1220" : "#0b0b0f"
-                    }}
-                    >
-                      <div style={{ fontWeight: 900, fontSize: 13, letterSpacing: 0.3 }}>
-                        Court Assignments
-                       </div>
-
-                    {isFinal ? (
-                        <span
-                        style={{
-                            fontSize: 12,
-                            padding: "4px 8px",
-                            borderRadius: 999,
-                            border: "1px solid #2a2a33",
-                            background: "#0b0b0f",
-                            color: "#d4d4db",
-                            fontWeight: 800,
-                        }}
-                        >
-                        🔒 Finalized
-                        </span>
-                    ) : null}
-                    </div>
-
-                    <div
-                    style={{
-                        display: "grid",
-                        gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
-                        gap: 10,
-                        opacity: isFinal ? 0.92 : 1,
-                        filter: isFinal ? "saturate(0.95)" : undefined,
-                        transition: "opacity 160ms ease",
-                    }}
-                    >
-                    {pairings.map((court, idx) => {
-                        const cId = courtId(s.id, idx);
-
-                        return (
-                        <div
-                            key={cId}
-                            id={cId}
-                            style={{
-                            border: "1px solid #2a2a33",
-                            borderRadius: 14,
-                            padding: 12,
-                            background: "#0b0b0f",
-                            }}
-                        >
+                          <div style={{ marginTop: 12 }}>
                             <div
-                            style={{
+                              style={{
                                 display: "flex",
-                                justifyContent: "space-between",
                                 alignItems: "center",
+                                justifyContent: "space-between",
                                 marginBottom: 10,
-                            }}
+                                padding: "8px 10px",
+                                borderRadius: 12,
+                                border: "1px solid #2a2a33",
+                                background: isFinal ? "#0b1220" : "#0b0b0f",
+                              }}
                             >
-                            <div style={{ fontSize: 13, fontWeight: 800 }}>
-                                Court {idx + 1}
-                            </div>
-                            <div style={{ fontSize: 12, color: "#a1a1aa" }}>
-                                {court.length} kid{court.length === 1 ? "" : "s"}
-                            </div>
+                              <div
+                                style={{
+                                  fontWeight: 900,
+                                  fontSize: 13,
+                                  letterSpacing: 0.3,
+                                }}
+                              >
+                                Court Assignments
+                              </div>
+
+                              {isFinal ? (
+                                <span
+                                  style={{
+                                    fontSize: 12,
+                                    padding: "4px 8px",
+                                    borderRadius: 999,
+                                    border: "1px solid #2a2a33",
+                                    background: "#0b0b0f",
+                                    color: "#d4d4db",
+                                    fontWeight: 800,
+                                  }}
+                                >
+                                  🔒 Finalized
+                                </span>
+                              ) : null}
                             </div>
 
-                            <SortableContext
-                            items={court}
-                            strategy={verticalListSortingStrategy}
+                            <div
+                              style={{
+                                display: "grid",
+                                gridTemplateColumns:
+                                  "repeat(auto-fit, minmax(240px, 1fr))",
+                                gap: 10,
+                                opacity: isFinal ? 0.92 : 1,
+                                filter: isFinal ? "saturate(0.95)" : undefined,
+                                transition: "opacity 160ms ease",
+                              }}
                             >
-                            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                                {court.map((n) => (
-                                <DraggableKidPill key={n} id={n} disabled={isFinal} />
-                                ))}
+                              {pairings.map((court, idx) => {
+                                const cId = courtId(s.id, idx);
+
+                                return (
+                                  <div
+                                    key={cId}
+                                    id={cId}
+                                    style={{
+                                      border: "1px solid #2a2a33",
+                                      borderRadius: 14,
+                                      padding: 12,
+                                      background: "#0b0b0f",
+                                    }}
+                                  >
+                                    <div
+                                      style={{
+                                        display: "flex",
+                                        justifyContent: "space-between",
+                                        alignItems: "center",
+                                        marginBottom: 10,
+                                      }}
+                                    >
+                                      <div
+                                        style={{
+                                          fontSize: 13,
+                                          fontWeight: 800,
+                                        }}
+                                      >
+                                        Court {idx + 1}
+                                      </div>
+                                      <div
+                                        style={{
+                                          fontSize: 12,
+                                          color: "#a1a1aa",
+                                        }}
+                                      >
+                                        {court.length} kid
+                                        {court.length === 1 ? "" : "s"}
+                                      </div>
+                                    </div>
+
+                                    <SortableContext
+                                      items={court}
+                                      strategy={verticalListSortingStrategy}
+                                    >
+                                      <div
+                                        style={{
+                                          display: "flex",
+                                          gap: 8,
+                                          flexWrap: "wrap",
+                                        }}
+                                      >
+                                        {court.map((kidId) => (
+                                          <DraggableKidPill
+                                            key={kidId}
+                                            id={kidId}
+                                            label={kidLabelById.get(kidId) ?? kidId}
+                                            disabled={isFinal}
+                                          />
+                                        ))}
+                                      </div>
+                                    </SortableContext>
+                                  </div>
+                                );
+                              })}
                             </div>
-                            </SortableContext>
+                          </div>
+                        </DndContext>
+                      ) : (
+                        <div style={{ marginTop: 10, ...styles.subText }}>
+                          Not enough kids to pair
                         </div>
-                        );
-                    })}
-                    </div>
-                </div>
-                </DndContext>
-            ) : (
-                <div style={{ marginTop: 10, ...styles.subText }}>
-                Not enough kids to pair
-                </div>
-            )
-            ) : null}
+                      )
+                    ) : null}
 
                     {isNamesOpen ? (
                       <div style={styles.namesPanel}>
@@ -927,8 +1055,8 @@ export default function HeadcountBoard() {
                         </div>
                         {yesNames.length ? (
                           <div style={{ marginBottom: 10 }}>
-                            {yesNames.map((n) => (
-                              <span key={`y-${n}`} style={styles.namePill}>
+                            {yesNames.map((n, idx) => (
+                              <span key={`y-${idx}-${n}`} style={styles.namePill}>
                                 {n}
                               </span>
                             ))}
@@ -956,8 +1084,8 @@ export default function HeadcountBoard() {
                         </div>
                         {noNames.length ? (
                           <div>
-                            {noNames.map((n) => (
-                              <span key={`n-${n}`} style={styles.namePill}>
+                            {noNames.map((n, idx) => (
+                              <span key={`n-${idx}-${n}`} style={styles.namePill}>
                                 {n}
                               </span>
                             ))}
@@ -992,7 +1120,9 @@ export default function HeadcountBoard() {
                           type="number"
                           value={s.makeUpCount}
                           onChange={(e) =>
-                            updateLocal(s.id, { makeUpCount: Number(e.target.value) })
+                            updateLocal(s.id, {
+                              makeUpCount: Number(e.target.value),
+                            })
                           }
                           style={styles.input}
                           min={0}
