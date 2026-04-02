@@ -1,8 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
 import type { Session } from "./page";
 
 type CourtMap = Record<string, string[][]>;
@@ -63,9 +62,55 @@ function generateCourts(names: string[]) {
   return courts;
 }
 
-export default function CoachBoard({ sessions }: { sessions: Session[] }) {
-  const router = useRouter();
+function getTodayYMD() {
+  return new Date().toISOString().split("T")[0];
+}
+
+export default function CoachBoard({
+  sessions: initialSessions,
+}: {
+  sessions: Session[];
+}) {
+  const [sessions, setSessions] = useState<Session[]>(initialSessions);
   const [generatedCourts, setGeneratedCourts] = useState<CourtMap>({});
+  const [loading, setLoading] = useState<boolean>(initialSessions.length === 0);
+  const [error, setError] = useState<string>("");
+
+  async function loadSessions() {
+    setLoading(true);
+    setError("");
+
+    try {
+      const res = await fetch("/api/sessions", {
+        cache: "no-store",
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || "Failed to load sessions");
+      }
+
+      const data = await res.json();
+
+      if (!Array.isArray(data)) {
+        throw new Error("Unexpected sessions response");
+      }
+
+      const today = getTodayYMD();
+      const todaysSessions = data.filter((session: Session) => session.date === today);
+
+      setSessions(todaysSessions);
+    } catch (err: any) {
+      setError(err?.message ?? "Failed to load sessions");
+      setSessions([]);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadSessions();
+  }, []);
 
   const sortedSessions = useMemo(() => {
     return [...sessions].sort((a, b) => a.startTime.localeCompare(b.startTime));
@@ -107,13 +152,17 @@ export default function CoachBoard({ sessions }: { sessions: Session[] }) {
               History
             </Link>
 
-            <button style={styles.refreshButton} onClick={() => router.refresh()}>
+            <button style={styles.refreshButton} onClick={loadSessions}>
               Refresh
             </button>
           </div>
         </div>
 
-        {sortedSessions.length === 0 ? (
+        {error ? <div style={styles.errorBox}>{error}</div> : null}
+
+        {loading ? (
+          <div style={styles.emptyState}>Loading sessions...</div>
+        ) : sortedSessions.length === 0 ? (
           <div style={styles.emptyState}>No sessions scheduled for today.</div>
         ) : (
           <div style={styles.cardList}>
@@ -257,6 +306,14 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: "14px",
     fontWeight: 600,
     cursor: "pointer",
+  },
+  errorBox: {
+    marginBottom: "16px",
+    padding: "12px 14px",
+    borderRadius: "12px",
+    backgroundColor: "#2a0f12",
+    color: "#fecaca",
+    border: "1px solid #7f1d1d",
   },
   emptyState: {
     backgroundColor: "#ffffff",
