@@ -12,7 +12,11 @@ export type Session = {
 };
 
 async function getSessions(): Promise<Session[]> {
-  const res = await fetch("http://localhost:3000/api/sessions", {
+  const baseUrl = process.env.VERCEL_URL
+    ? `https://${process.env.VERCEL_URL}`
+    : "http://localhost:3000";
+
+  const res = await fetch(`${baseUrl}/api/sessions`, {
     cache: "no-store",
   });
 
