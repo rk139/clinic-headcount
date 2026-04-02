@@ -328,6 +328,10 @@ export default function HistoryPage() {
         <Link href="/headcount" style={styles.navLinkBtn}>
           Headcount
         </Link>
+
+        <Link href="/coach" style={styles.navLinkBtn}>
+          Coach View
+        </Link>
       </div>
 
       {pageError && (

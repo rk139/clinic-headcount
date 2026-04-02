@@ -619,17 +619,27 @@ export default function HeadcountBoard() {
       borderRadius: 10,
       border: "1px solid #2a2a33",
       background: "#0b0b0f",
-      color: "#d4d4db",
+      color: "#9ca3af"
     } as React.CSSProperties,
-    linkBtn: (disabled: boolean) =>
-      ({
-        padding: "6px 10px",
-        borderRadius: 10,
-        border: "1px solid #2a2a33",
-        background: disabled ? "#14141c" : "transparent",
-        color: disabled ? "#7c7c88" : "#d4d4db",
-        cursor: disabled ? "not-allowed" : "pointer",
-      }) as React.CSSProperties,
+    linkBtn: (disabled: boolean, variant?: "copy") =>
+        ({
+          padding: "6px 10px",
+          borderRadius: 10,
+          border:
+            variant === "copy"
+              ? "1px solid #4ade80"
+              : "1px solid #2a2a33",
+          background: disabled ? "#14141c" : "#0b0b0f",
+          color:
+            disabled
+              ? "#7c7c88"
+              : variant === "copy"
+              ? "#4ade80"
+              : "#d4d4db",
+          cursor: disabled ? "not-allowed" : "pointer",
+          opacity: disabled ? 0.6 : 1,
+          transition: "all 0.15s ease",
+        }) as React.CSSProperties,
     errorBox: {
       marginBottom: 16,
       color: "#fecaca",
@@ -648,10 +658,10 @@ export default function HeadcountBoard() {
     } as React.CSSProperties,
     namesPanel: {
       marginTop: 10,
-      border: "1px solid #2a2a33",
+      border: "1px solid #1f2937",
       borderRadius: 12,
-      background: "#0b0b0f",
-      padding: 10,
+      background: "#0b0f14",
+      padding: 12,
       color: "#d4d4db",
     } as React.CSSProperties,
     namePill: {
@@ -697,72 +707,68 @@ export default function HeadcountBoard() {
   return (
     <main style={styles.page}>
       <h1 style={{ fontSize: 30, marginBottom: 8 }}>Clinic Headcount</h1>
-      <p style={{ marginBottom: 14, ...styles.subText }}>
-        Expected = Full Session + Make-up + Single-date
-      </p>
-
+  
       <div style={styles.topRow}>
         <div style={styles.topLeftActions}>
           <button onClick={load} style={styles.refreshBtn}>
             Refresh
           </button>
-
+  
           <Link href="/history" style={styles.navLinkBtn}>
             History
           </Link>
+
+          <Link href="/coach" style={styles.navLinkBtn}>
+            Coach View
+          </Link>
         </div>
       </div>
-
+  
       {error ? (
         <div style={styles.errorBox}>
           <strong>Error:</strong> {error}
         </div>
       ) : null}
-
+  
       {dates.map((date) => {
         const daySessions = byDate.get(date)!;
-
+  
         return (
           <section key={date} style={{ marginBottom: 24 }}>
             <h2 style={styles.dateHeader}>{date}</h2>
-
+  
             <div style={{ display: "grid", gap: 12 }}>
               {daySessions.map((s) => {
                 const hasLink = !!s.responseLink?.token;
                 const isClosed = !!s.responseLink?.closedAt;
                 const busy = linkBusyId === s.id || closeBusyId === s.id;
-
+  
                 const yesKidsObj = uniqueKidsPreserveOrder(s.attendingKids ?? []);
                 const noKidsObj = uniqueKidsPreserveOrder(s.notAttendingKids ?? []);
-
+  
                 const { idToDisplay: yesIdToDisplay } =
                   computeDisplayLabelMap(yesKidsObj);
                 const { idToDisplay: noIdToDisplay } =
                   computeDisplayLabelMap(noKidsObj);
-
+  
                 const yesNames = yesKidsObj.map(
                   (k) => yesIdToDisplay.get(k.key) ?? k.label
                 );
                 const noNames = noKidsObj.map(
                   (k) => noIdToDisplay.get(k.key) ?? k.label
                 );
-
-                const kidLabelById = yesIdToDisplay;
-
-                const pairings = pairingsBySessionId[s.id];
-                const isFinal = !!finalizedBySessionId[s.id];
-
+  
                 const yesKids = s.attendingKidsCount ?? yesNames.length;
                 const noKids = s.notAttendingKidsCount ?? noNames.length;
-
+  
                 const isNamesOpen = !!openNamesForId[s.id];
-
+  
                 const toggleNames = () =>
                   setOpenNamesForId((prev) => ({
                     ...prev,
                     [s.id]: !prev[s.id],
                   }));
-
+  
                 return (
                   <div key={s.id} style={styles.card}>
                     <div
@@ -773,287 +779,99 @@ export default function HeadcountBoard() {
                         {s.startTime}–{s.endTime}
                       </span>
                     </div>
-
-                    <div style={styles.metaRow}>
-                      <span>Capacity: {s.capacity}</span>
-                      <span>
-                        Expected:{" "}
-                        <strong style={{ color: "#eaeaf0" }}>{expected(s)}</strong>
-                      </span>
-
-                      <span>
-                        Responses:{" "}
-                        <strong style={{ color: "#eaeaf0" }}>
-                          {s.attendingCount ?? 0} Yes /{" "}
-                          {s.notAttendingCount ?? 0} No
-                        </strong>
-                      </span>
-
-                      <span>
-                        RSVP kids:{" "}
-                        <strong style={{ color: "#eaeaf0" }}>
-                          {yesKids} Yes / {noKids} No
-                        </strong>
-                      </span>
-
-                      <button
-                        type="button"
-                        onClick={toggleNames}
-                        style={styles.namesBtn}
-                      >
-                        {isNamesOpen ? "Hide names" : "Show names"}
-                      </button>
-
-                      <span
-                        style={{ marginLeft: "auto", display: "flex", gap: 8 }}
-                      >
-                        {!hasLink ? (
-                          <button
-                            type="button"
-                            onClick={() => generateLink(s.id)}
-                            disabled={linkBusyId === s.id}
-                            style={styles.linkBtn(linkBusyId === s.id)}
-                          >
-                            {linkBusyId === s.id
-                              ? "Generating..."
-                              : "Generate Link"}
-                          </button>
-                        ) : isClosed ? (
-                          <>
-                            <span style={styles.linkChip}>Link closed</span>
-                            <button
-                              type="button"
-                              onClick={() => reopenLink(s.id)}
-                              disabled={busy}
-                              style={styles.linkBtn(busy)}
-                            >
-                              {closeBusyId === s.id ? "Reopening..." : "Reopen"}
-                            </button>
-                          </>
-                        ) : (
-                          <>
-                            <span style={styles.linkChip}>
-                              /r/{s.responseLink!.token}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                copyLink(s.responseLink!.token, s.id)
-                              }
-                              disabled={busy}
-                              style={styles.linkBtn(busy)}
-                            >
-                              {copiedSessionId === s.id ? "Copied" : "Copy"}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => closeLink(s.id)}
-                              disabled={busy}
-                              style={styles.linkBtn(busy)}
-                            >
-                              {closeBusyId === s.id ? "Closing..." : "Close"}
-                            </button>
-                          </>
-                        )}
-                      </span>
-                    </div>
-
+  
                     <div
                       style={{
-                        display: "flex",
-                        gap: 8,
-                        marginTop: 10,
-                        flexWrap: "wrap",
+                        marginTop: 12,
+                        padding: "14px 16px",
+                        borderRadius: 12,
+                        background: "#0b0f14",
+                        border: "1px solid #1f2937",
                       }}
                     >
-                      <button
-                        type="button"
-                        onClick={() => generatePairings(s.id)}
-                        disabled={isFinal || yesNames.length < 2}
-                        style={styles.pillBtn(
-                          "success",
-                          isFinal || yesNames.length < 2
-                        )}
-                      >
-                        Generate Pairings
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (
-                            window.confirm(
-                              "Clear all pairings for this session?"
-                            )
-                          )
-                            clearPairings(s.id);
+                      <div
+                        style={{
+                          fontSize: 26,
+                          fontWeight: 800,
+                          color: "#4ade80",
                         }}
-                        disabled={isFinal || !pairings}
-                        style={styles.pillBtn("neutral", isFinal || !pairings)}
                       >
-                        Clear Pairings
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => finalizeSession(s.id)}
-                        disabled={isFinal || !pairings || pairings.length === 0}
-                        style={styles.pillBtn(
-                          "neutral",
-                          isFinal || !pairings || pairings.length === 0
-                        )}
+                        {yesKids} kids attending
+                      </div>
+  
+                      <div style={{ marginTop: 6, marginBottom: 4, color: "#9ca3af" }}>
+                        Registered: {s.capacity}
+                      </div>
+  
+                      <div
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          marginTop: 14,
+                          flexWrap: "wrap",
+                          gap: 10,
+                        }}
                       >
-                        {isFinal ? "Finalized ✓" : "Finalize"}
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => unlockSession(s.id)}
-                        disabled={!isFinal}
-                        style={styles.pillBtn("danger", !isFinal)}
-                      >
-                        Unlock
-                      </button>
-
-                      {yesNames.length < 2 ? (
-                        <span style={styles.subText}>Not enough kids to pair</span>
-                      ) : null}
-                    </div>
-
-                    {pairings ? (
-                      pairings.length ? (
-                        <DndContext
-                          sensors={sensors}
-                          collisionDetection={closestCenter}
-                          onDragOver={isFinal ? undefined : handleDragOver(s.id)}
-                          onDragEnd={isFinal ? undefined : handleDragEnd(s.id)}
+                        <button
+                          type="button"
+                          onClick={toggleNames}
+                          style={styles.namesBtn}
                         >
-                          <div style={{ marginTop: 12 }}>
-                            <div
-                              style={{
-                                display: "flex",
-                                alignItems: "center",
-                                justifyContent: "space-between",
-                                marginBottom: 10,
-                                padding: "8px 10px",
-                                borderRadius: 12,
-                                border: "1px solid #2a2a33",
-                                background: isFinal ? "#0b1220" : "#0b0b0f",
-                              }}
+                          {isNamesOpen ? "Hide names" : "Show names"}
+                        </button>
+  
+                        <span style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          {!hasLink ? (
+                            <button
+                              type="button"
+                              onClick={() => generateLink(s.id)}
+                              disabled={linkBusyId === s.id}
+                              style={styles.linkBtn(linkBusyId === s.id)}
                             >
-                              <div
-                                style={{
-                                  fontWeight: 900,
-                                  fontSize: 13,
-                                  letterSpacing: 0.3,
-                                }}
+                              {linkBusyId === s.id
+                                ? "Generating..."
+                                : "Generate Link"}
+                            </button>
+                          ) : isClosed ? (
+                            <>
+                              <span style={styles.linkChip}>Link closed</span>
+                              <button
+                                type="button"
+                                onClick={() => reopenLink(s.id)}
+                                disabled={busy}
+                                style={styles.linkBtn(busy)}
                               >
-                                Court Assignments
-                              </div>
-
-                              {isFinal ? (
-                                <span
-                                  style={{
-                                    fontSize: 12,
-                                    padding: "4px 8px",
-                                    borderRadius: 999,
-                                    border: "1px solid #2a2a33",
-                                    background: "#0b0b0f",
-                                    color: "#d4d4db",
-                                    fontWeight: 800,
-                                  }}
-                                >
-                                  🔒 Finalized
-                                </span>
-                              ) : null}
-                            </div>
-
-                            <div
-                              style={{
-                                display: "grid",
-                                gridTemplateColumns:
-                                  "repeat(auto-fit, minmax(240px, 1fr))",
-                                gap: 10,
-                                opacity: isFinal ? 0.92 : 1,
-                                filter: isFinal ? "saturate(0.95)" : undefined,
-                                transition: "opacity 160ms ease",
-                              }}
-                            >
-                              {pairings.map((court, idx) => {
-                                const cId = courtId(s.id, idx);
-
-                                return (
-                                  <div
-                                    key={cId}
-                                    id={cId}
-                                    style={{
-                                      border: "1px solid #2a2a33",
-                                      borderRadius: 14,
-                                      padding: 12,
-                                      background: "#0b0b0f",
-                                    }}
-                                  >
-                                    <div
-                                      style={{
-                                        display: "flex",
-                                        justifyContent: "space-between",
-                                        alignItems: "center",
-                                        marginBottom: 10,
-                                      }}
-                                    >
-                                      <div
-                                        style={{
-                                          fontSize: 13,
-                                          fontWeight: 800,
-                                        }}
-                                      >
-                                        Court {idx + 1}
-                                      </div>
-                                      <div
-                                        style={{
-                                          fontSize: 12,
-                                          color: "#a1a1aa",
-                                        }}
-                                      >
-                                        {court.length} kid
-                                        {court.length === 1 ? "" : "s"}
-                                      </div>
-                                    </div>
-
-                                    <SortableContext
-                                      items={court}
-                                      strategy={verticalListSortingStrategy}
-                                    >
-                                      <div
-                                        style={{
-                                          display: "flex",
-                                          gap: 8,
-                                          flexWrap: "wrap",
-                                        }}
-                                      >
-                                        {court.map((kidId) => (
-                                          <DraggableKidPill
-                                            key={kidId}
-                                            id={kidId}
-                                            label={kidLabelById.get(kidId) ?? kidId}
-                                            disabled={isFinal}
-                                          />
-                                        ))}
-                                      </div>
-                                    </SortableContext>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        </DndContext>
-                      ) : (
-                        <div style={{ marginTop: 10, ...styles.subText }}>
-                          Not enough kids to pair
-                        </div>
-                      )
-                    ) : null}
-
+                                {closeBusyId === s.id ? "Reopening..." : "Reopen"}
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <span style={styles.linkChip}>
+                                /r/{s.responseLink!.token}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => copyLink(s.responseLink!.token, s.id)}
+                                disabled={busy}
+                                style={styles.linkBtn(busy, "copy")}
+                              >
+                                {copiedSessionId === s.id ? "Copied" : "Copy"}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => closeLink(s.id)}
+                                disabled={busy}
+                                style={styles.linkBtn(busy)}
+                              >
+                                {closeBusyId === s.id ? "Closing..." : "Close"}
+                              </button>
+                            </>
+                          )}
+                        </span>
+                      </div>
+                    </div>
+  
                     {isNamesOpen ? (
                       <div style={styles.namesPanel}>
                         <div
@@ -1061,10 +879,12 @@ export default function HeadcountBoard() {
                             fontSize: 12,
                             fontWeight: 700,
                             marginBottom: 6,
+                            color: "#4ade80",
                           }}
                         >
                           Attending ({yesNames.length})
                         </div>
+  
                         {yesNames.length ? (
                           <div style={{ marginBottom: 10 }}>
                             {yesNames.map((n, idx) => (
@@ -1084,16 +904,18 @@ export default function HeadcountBoard() {
                             No names yet.
                           </div>
                         )}
-
+  
                         <div
                           style={{
                             fontSize: 12,
-                            fontWeight: 700,
+                            fontWeight: 600,
+                            color: "#a1a1aa",
                             marginBottom: 6,
                           }}
                         >
                           Not attending ({noNames.length})
                         </div>
+  
                         {noNames.length ? (
                           <div>
                             {noNames.map((n, idx) => (
@@ -1109,61 +931,6 @@ export default function HeadcountBoard() {
                         )}
                       </div>
                     ) : null}
-
-                    <div style={styles.row}>
-                      <label style={styles.label}>
-                        Full
-                        <input
-                          type="number"
-                          value={s.fullSessionCount}
-                          onChange={(e) =>
-                            updateLocal(s.id, {
-                              fullSessionCount: Number(e.target.value),
-                            })
-                          }
-                          style={styles.input}
-                          min={0}
-                        />
-                      </label>
-
-                      <label style={styles.label}>
-                        Make-up
-                        <input
-                          type="number"
-                          value={s.makeUpCount}
-                          onChange={(e) =>
-                            updateLocal(s.id, {
-                              makeUpCount: Number(e.target.value),
-                            })
-                          }
-                          style={styles.input}
-                          min={0}
-                        />
-                      </label>
-
-                      <label style={styles.label}>
-                        Single-date
-                        <input
-                          type="number"
-                          value={s.singleDateCount}
-                          onChange={(e) =>
-                            updateLocal(s.id, {
-                              singleDateCount: Number(e.target.value),
-                            })
-                          }
-                          style={styles.input}
-                          min={0}
-                        />
-                      </label>
-
-                      <button
-                        onClick={() => saveRow(s)}
-                        disabled={!!saving[s.id]}
-                        style={styles.saveBtn(!!saving[s.id])}
-                      >
-                        {saving[s.id] ? "Saving..." : "Save"}
-                      </button>
-                    </div>
                   </div>
                 );
               })}

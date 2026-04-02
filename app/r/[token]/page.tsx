@@ -132,7 +132,7 @@ export default function ResponsePage() {
 
     setFamilyCode(code);
 
-    const names = choice === "attending" ? cleanedKidNames() : [];
+    const names = cleanedKidNames();
 
     if (choice === "attending" && names.length === 0) {
       setIsError(true);
@@ -296,9 +296,7 @@ export default function ResponsePage() {
                         />
 
                         <div className="mt-2 text-xs text-black/45 max-w-sm mx-auto leading-relaxed text-left">
-                          <div>
-                            Use LAST NAME + 2 digits (example: KUMAR12).
-                          </div>
+                          <div>Use LAST NAME + 2 digits (example: KUMAR12).</div>
                           <div>
                             Use the same code each time so updates replace your
                             previous response.
@@ -317,9 +315,7 @@ export default function ResponsePage() {
                           <div key={i} className="flex gap-2">
                             <input
                               value={value}
-                              onChange={(e) =>
-                                updateKidName(i, e.target.value)
-                              }
+                              onChange={(e) => updateKidName(i, e.target.value)}
                               placeholder={
                                 i === 0 ? "Kid name" : `Kid name ${i + 1}`
                               }
@@ -390,20 +386,18 @@ export default function ResponsePage() {
                         <span
                           className={`${showSuccessAnim ? "animate-pulse" : ""}`}
                         >
-                          {message ||
-                            "Thanks — your response has been saved."}
+                          {message || "Thanks — your response has been saved."}
                         </span>
                       </div>
 
-                      {savedChoice === "attending" &&
-                        submittedKidNames.length > 0 && (
-                          <div className="mt-3 text-xs text-green-800/90">
-                            <div className="font-semibold">Names:</div>
-                            <div className="mt-1">
-                              {submittedKidNames.join(", ")}
-                            </div>
+                      {submittedKidNames.length > 0 && (
+                        <div className="mt-3 text-xs text-green-800/90">
+                          <div className="font-semibold">Names:</div>
+                          <div className="mt-1">
+                            {submittedKidNames.join(", ")}
                           </div>
-                        )}
+                        </div>
+                      )}
 
                       <div className="mt-2 text-xs text-green-700/80">
                         If you need to change it, you can update your response

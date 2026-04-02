@@ -55,15 +55,13 @@ export async function POST(
 
     const rawKidNames = body?.kidNames;
 
-    // ✅ Fix 1: only allow kidNames when attending
-    const kidNames =
-      choice === "attending" && Array.isArray(rawKidNames)
-        ? rawKidNames
-            .filter((n): n is string => typeof n === "string")
-            .map((n) => n.trim())
-            .filter((n) => n.length > 0)
-            .slice(0, 6)
-        : [];
+    const kidNames = Array.isArray(rawKidNames)
+      ? rawKidNames
+          .filter((n): n is string => typeof n === "string")
+          .map((n) => n.trim())
+          .filter((n) => n.length > 0)
+          .slice(0, 6)
+      : [];
 
     if (choice === "attending" && kidNames.length === 0) {
       return NextResponse.json(
@@ -108,32 +106,24 @@ export async function POST(
       );
     }
 
-    const prev = await prisma.sessionResponse.findFirst({
-      where: { linkId: link.id, familyCode },
-      orderBy: { createdAt: "desc" },
-    });
-
-    const previousChoice = prev?.choice ?? null;
-    const replaced = previousChoice !== null;
-
     const created = await prisma.sessionResponse.upsert({
-        where: {
-          linkId_familyCode: {
-            linkId: link.id,
-            familyCode,
-          },
-        },
-        update: {
-          choice,
-          kidNames: kidNames.length ? kidNames : undefined,
-        },
-        create: {
+      where: {
+        linkId_familyCode: {
           linkId: link.id,
           familyCode,
-          choice,
-          kidNames: kidNames.length ? kidNames : undefined,
         },
-      });
+      },
+      update: {
+        choice,
+        kidNames,
+      },
+      create: {
+        linkId: link.id,
+        familyCode,
+        choice,
+        kidNames,
+      },
+    });
 
     return NextResponse.json({
       ok: true,
@@ -141,8 +131,6 @@ export async function POST(
       familyCode,
       choice: created.choice,
       kidNames: created.kidNames,
-      replaced,
-      previousChoice,
     });
   } catch (err) {
     console.error("POST /api/r/[token]/respond failed:", err);
