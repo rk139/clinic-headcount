@@ -143,18 +143,6 @@ async function main() {
         singleDateCount: 1,
       });
 
-      // Level 4
-      sessions.push({
-        date,
-        startTime: "14:30",
-        endTime: "16:00",
-        programType: "JUNIORS",
-        level: 4,
-        capacity: CAP_L4,
-        fullSessionCount: 8,
-        makeUpCount: 1,
-        singleDateCount: 1,
-      });
     }
   }
 
