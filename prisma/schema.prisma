@@ -11,6 +11,9 @@ datasource db {
 }
 
 model ClinicSession {
+
+  //unique id created for each entry automatically
+
   id        String @id @default(cuid())
   date      String
   startTime String
@@ -28,10 +31,31 @@ model ClinicSession {
   responseLink ResponseLink?
   attendances SessionAttendance[]
 
+  // Timestamp when this record was first created
   createdAt DateTime @default(now())
+
+  // Timestamp automatically updated whenever this record changes
   updatedAt DateTime @updatedAt
 
+  // Uses the date field as an index to quickly find sessions.
+  // I picture it like:
+  //
+  // July 4  ---> Session 1, Session 2
+  // July 5  ---> Session 3
+  // July 6  ---> Session 4, Session 5
+  //
+  // This lets the database quickly find all sessions for a
+  // specific date instead of searching every row.
   @@index([date])
+
+  // Uses programType and level together as an index.
+  //
+  // Junior, Level 1 ---> Session 2, Session 8
+  // Junior, Level 2 ---> Session 3
+  // Adult,  N/A     ---> Session 5
+  //
+  // This lets the database quickly find sessions that match
+  // both the program type and level.
   @@index([programType, level])
 }
 
