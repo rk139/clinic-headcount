@@ -11,7 +11,6 @@ datasource db {
 }
 
 model ClinicSession {
-
   //unique id created for each entry automatically
 
   id        String @id @default(cuid())
@@ -29,7 +28,7 @@ model ClinicSession {
   singleDateCount  Int @default(0)
 
   responseLink ResponseLink?
-  attendances SessionAttendance[]
+  attendances  SessionAttendance[]
 
   // Timestamp when this record was first created
   createdAt DateTime @default(now())
@@ -47,7 +46,6 @@ model ClinicSession {
   // This lets the database quickly find all sessions for a
   // specific date instead of searching every row.
   @@index([date])
-
   // Uses programType and level together as an index.
   //
   // Junior, Level 1 ---> Session 2, Session 8
@@ -63,7 +61,7 @@ model ResponseLink {
   id    String @id @default(cuid())
   token String @unique
 
-  sessionId String @unique
+  sessionId String        @unique
   session   ClinicSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   expiresAt DateTime?
@@ -82,7 +80,7 @@ model SessionResponse {
   linkId String
   link   ResponseLink @relation(fields: [linkId], references: [id], onDelete: Cascade)
 
-  choice String
+  choice   String
   kidNames Json?
 
   createdAt DateTime @default(now())
@@ -90,7 +88,6 @@ model SessionResponse {
   // ✅ FINAL TOUCH:
   // One row per family per link — database enforced.
   @@unique([linkId, familyCode])
-
   // Helpful indexes
   @@index([linkId])
   @@index([createdAt])
@@ -119,8 +116,3 @@ model SessionAttendance {
   @@unique([sessionId, kidKey])
   @@index([sessionId])
 }
-
-
-
-
-
