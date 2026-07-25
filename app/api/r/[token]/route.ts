@@ -1,25 +1,54 @@
-import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
 import { DateTime } from "luxon";
+import { NextResponse } from "next/server";
+
+import { prisma } from "@/lib/prisma";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+const TIME_ZONE = "America/New_York";
+
+type RouteContext = {
+  params: Promise<{
+    token: string;
+  }>;
+};
+
+type Choice = "attending" | "not_attending";
 
 function formatTime(hhmm: string) {
-  const [hhStr, mmStr] = hhmm.split(":");
-  const hh = Number(hhStr);
-  const mm = Number(mmStr);
+  const [hourString, minuteString] = hhmm.split(":");
+  const hour = Number(hourString);
+  const minute = Number(minuteString);
 
-  if (Number.isNaN(hh) || Number.isNaN(mm)) return hhmm;
+  if (
+    !Number.isInteger(hour) ||
+    !Number.isInteger(minute) ||
+    hour < 0 ||
+    hour > 23 ||
+    minute < 0 ||
+    minute > 59
+  ) {
+    return hhmm;
+  }
 
-  const suffix = hh >= 12 ? "PM" : "AM";
-  const hour12 = hh % 12 === 0 ? 12 : hh % 12;
-  const mm2 = String(mm).padStart(2, "0");
-  return `${hour12}:${mm2} ${suffix}`;
+  const suffix = hour >= 12 ? "PM" : "AM";
+  const hour12 = hour % 12 === 0 ? 12 : hour % 12;
+  const paddedMinute = String(minute).padStart(2, "0");
+
+  return `${hour12}:${paddedMinute} ${suffix}`;
 }
 
-function formatDateLabel(yyyyMmDd: string) {
-  const d = new Date(`${yyyyMmDd}T00:00:00`);
-  if (Number.isNaN(d.getTime())) return yyyyMmDd;
+function formatDateLabel(date: string) {
+  const parsedDate = DateTime.fromISO(date, {
+    zone: TIME_ZONE,
+  });
 
-  return d.toLocaleDateString(undefined, {
+  if (!parsedDate.isValid) {
+    return date;
+  }
+
+  return parsedDate.toLocaleString({
     weekday: "long",
     month: "short",
     day: "numeric",
@@ -30,114 +59,219 @@ function programLabel(_programType: string) {
   return "Clinic Session";
 }
 
-function groupLabel(programType: string, level: string | null) {
-  if (programType === "RED_BALL") return "Red Ball";
+function groupLabel(
+  programType: string,
+  level: string | null,
+) {
+  if (programType === "RED_BALL") {
+    return "Red Ball";
+  }
+
   return level ? `Level ${level}` : "Juniors";
 }
 
 function sessionStartMs(date: string, startTime: string) {
-   const ZONE = "America/New_York";
-   const dt = DateTime.fromISO(`${date}T${startTime}`, { zone: ZONE });
-   return dt.isValid ? dt.toMillis() : NaN;
+  const dateTime = DateTime.fromISO(`${date}T${startTime}`, {
+    zone: TIME_ZONE,
+  });
+
+  return dateTime.isValid ? dateTime.toMillis() : Number.NaN;
 }
 
-type Choice = "attending" | "not_attending";
-
 function normalizeKidNames(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
   return value
-    .filter((n): n is string => typeof n === "string")
-    .map((n) => n.trim())
-    .filter((n) => n.length > 0)
+    .filter((name): name is string => typeof name === "string")
+    .map((name) => name.trim())
+    .filter((name) => name.length > 0)
     .slice(0, 6);
 }
 
 export async function GET(
-  req: Request,
-  { params }: { params: Promise<{ token: string }> }
+  request: Request,
+  context: RouteContext,
 ) {
-  const { token } = await params;
-
   try {
-    // ✅ Optional: familyCode query param
-    const url = new URL(req.url);
-    const rawFamilyCode = url.searchParams.get("familyCode") ?? "";
-    const familyCode = rawFamilyCode.trim().toUpperCase();
+    const { token } = await context.params;
+    const trimmedToken = token.trim();
+
+    if (!trimmedToken) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Invalid response link.",
+        },
+        {
+          status: 400,
+          headers: {
+            "Cache-Control": "no-store",
+          },
+        },
+      );
+    }
+
+    const url = new URL(request.url);
+
+    const familyCode = (
+      url.searchParams.get("familyCode") ?? ""
+    )
+      .trim()
+      .toUpperCase();
 
     const link = await prisma.responseLink.findUnique({
-      where: { token },
-      include: { session: true },
+      where: {
+        token: trimmedToken,
+      },
+      include: {
+        session: true,
+      },
     });
 
     if (!link) {
       return NextResponse.json(
-        { ok: false, error: "Invalid or expired link" },
-        { status: 404 }
+        {
+          ok: false,
+          error: "Invalid or expired link.",
+        },
+        {
+          status: 404,
+          headers: {
+            "Cache-Control": "no-store",
+          },
+        },
       );
     }
 
-    // Optional expiresAt support
-    if (link.expiresAt && link.expiresAt.getTime() < Date.now()) {
+    if (
+      link.expiresAt &&
+      link.expiresAt.getTime() < Date.now()
+    ) {
       return NextResponse.json(
-        { ok: false, error: "This link has expired" },
-        { status: 410 }
+        {
+          ok: false,
+          error: "This link has expired.",
+        },
+        {
+          status: 410,
+          headers: {
+            "Cache-Control": "no-store",
+          },
+        },
       );
     }
 
-    // ✅ manual close support
     if (link.closedAt) {
       return NextResponse.json(
-        { ok: false, error: "This link is closed." },
-        { status: 410 }
+        {
+          ok: false,
+          error: "This link is closed.",
+        },
+        {
+          status: 410,
+          headers: {
+            "Cache-Control": "no-store",
+          },
+        },
       );
     }
 
-    // Close at clinic start time
-    const start = sessionStartMs(link.session.date, link.session.startTime);
-    if (!Number.isNaN(start) && Date.now() >= start) {
+    const sessionStart = sessionStartMs(
+      link.session.date,
+      link.session.startTime,
+    );
+
+    if (
+      !Number.isNaN(sessionStart) &&
+      Date.now() >= sessionStart
+    ) {
       return NextResponse.json(
-        { ok: false, error: "This link is closed (clinic has started)." },
-        { status: 410 }
+        {
+          ok: false,
+          error: "This link is closed because the clinic has started.",
+        },
+        {
+          status: 410,
+          headers: {
+            "Cache-Control": "no-store",
+          },
+        },
       );
     }
 
-    // ✅ If familyCode is provided, return latest response for THAT family
     let currentChoice: Choice | null = null;
     let currentKidNames: string[] = [];
 
     if (familyCode) {
-      const latest = await prisma.sessionResponse.findFirst({
-        where: { linkId: link.id, familyCode },
-        orderBy: { createdAt: "desc" },
-        select: { choice: true, kidNames: true },
-      });
+      const latestResponse =
+        await prisma.sessionResponse.findFirst({
+          where: {
+            linkId: link.id,
+            familyCode,
+          },
+          orderBy: {
+            createdAt: "desc",
+          },
+          select: {
+            choice: true,
+            kidNames: true,
+          },
+        });
 
-      if (latest?.choice === "attending" || latest?.choice === "not_attending") {
-        currentChoice = latest.choice;
+      if (
+        latestResponse?.choice === "attending" ||
+        latestResponse?.choice === "not_attending"
+      ) {
+        currentChoice = latestResponse.choice;
       }
 
-      currentKidNames = normalizeKidNames(latest?.kidNames);
+      currentKidNames = normalizeKidNames(
+        latestResponse?.kidNames,
+      );
     }
 
-    const s = link.session;
+    const session = link.session;
 
-    return NextResponse.json({
-      ok: true,
-      session: {
-        dateLabel: formatDateLabel(s.date),
-        timeLabel: `${formatTime(s.startTime)} - ${formatTime(s.endTime)}`,
-        programLabel: programLabel(s.programType),
-        groupLabel: groupLabel(s.programType, s.level),
-        locationLabel: "Springside Athletic Club",
-      },
-      currentChoice,
-      currentKidNames,
-    });
-  } catch (err) {
-    console.error("GET /api/r/[token] failed:", err);
     return NextResponse.json(
-      { ok: false, error: "Server error" },
-      { status: 500 }
+      {
+        ok: true,
+        session: {
+          dateLabel: formatDateLabel(session.date),
+          timeLabel: `${formatTime(session.startTime)} - ${formatTime(
+            session.endTime,
+          )}`,
+          programLabel: programLabel(session.programType),
+          groupLabel: groupLabel(
+            session.programType,
+            session.level,
+          ),
+          locationLabel: "Springside Athletic Club",
+        },
+        currentChoice,
+        currentKidNames,
+      },
+      {
+        headers: {
+          "Cache-Control": "no-store",
+        },
+      },
+    );
+  } catch (error) {
+    console.error("GET /api/r/[token] failed:", error);
+
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "Failed to load the response link.",
+      },
+      {
+        status: 500,
+        headers: {
+          "Cache-Control": "no-store",
+        },
+      },
     );
   }
 }

@@ -1,60 +1,108 @@
 import { NextResponse } from "next/server";
-import { prisma } from "../../../../../lib/prisma";
+
+import { getCurrentSession } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function normalizeName(x: any) {
-  return String(x ?? "").trim();
+type RouteContext = {
+  params: Promise<{
+    id: string;
+  }>;
+};
+
+function normalizeName(value: unknown) {
+  return String(value ?? "").trim();
 }
 
-function toStringArray(v: any): string[] {
-  if (Array.isArray(v)) return v.map(normalizeName).filter(Boolean);
+function toStringArray(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.map(normalizeName).filter(Boolean);
+  }
 
-  if (typeof v === "string") {
+  if (typeof value === "string") {
     try {
-      const parsed = JSON.parse(v);
-      if (Array.isArray(parsed)) return parsed.map(normalizeName).filter(Boolean);
-    } catch {}
+      const parsed = JSON.parse(value);
+
+      if (Array.isArray(parsed)) {
+        return parsed.map(normalizeName).filter(Boolean);
+      }
+    } catch {
+      // Ignore invalid JSON.
+    }
   }
 
   return [];
 }
 
-export async function GET(req: Request, ctx: any) {
-  try {
-    // Next 16 sometimes makes params a Promise
-    const p = await ctx?.params;
-    const id = p?.id;
+function isAuthorizedRole(role: string) {
+  return role === "ADMIN" || role === "COACH";
+}
 
-    if (!id || typeof id !== "string") {
+export async function GET(
+  _request: Request,
+  context: RouteContext,
+) {
+  try {
+    const currentSession = await getCurrentSession();
+
+    if (!currentSession) {
       return NextResponse.json(
-        { error: "Missing or invalid params.id", got: p ?? null },
-        { status: 400 }
+        { error: "Authentication required." },
+        { status: 401 },
+      );
+    }
+
+    if (!isAuthorizedRole(currentSession.role)) {
+      return NextResponse.json(
+        { error: "Coach or administrator access required." },
+        { status: 403 },
+      );
+    }
+
+    const { id } = await context.params;
+
+    if (!id) {
+      return NextResponse.json(
+        { error: "Invalid session ID." },
+        { status: 400 },
       );
     }
 
     const link = await prisma.responseLink.findUnique({
-      where: { sessionId: id },
-      include: { responses: true },
+      where: {
+        sessionId: id,
+      },
+      include: {
+        responses: true,
+      },
     });
 
-    const responses = (link?.responses ?? []).map((r: any) => ({
-      familyCode: r.familyCode,
-      choice: r.choice,
-      kidNames: toStringArray(r.kidNames),
-      createdAt: r.createdAt,
+    const responses = (link?.responses ?? []).map((response) => ({
+      familyCode: response.familyCode,
+      choice: response.choice,
+      kidNames: toStringArray(response.kidNames),
+      createdAt: response.createdAt,
     }));
 
-    return NextResponse.json({ responses });
-  } catch (e: any) {
     return NextResponse.json(
+      { responses },
       {
-        error: e?.message ?? String(e),
-        // helpful sometimes:
-        name: e?.name,
+        headers: {
+          "Cache-Control": "no-store",
+        },
       },
-      { status: 500 }
+    );
+  } catch (error) {
+    console.error(
+      "GET /api/sessions/[id]/responses failed:",
+      error,
+    );
+
+    return NextResponse.json(
+      { error: "Failed to load responses." },
+      { status: 500 },
     );
   }
 }

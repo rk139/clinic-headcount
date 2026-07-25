@@ -1,46 +1,176 @@
 import { NextResponse } from "next/server";
+
+import { getCurrentSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
-export async function POST(
-  _req: Request,
-  { params }: { params: Promise<{ sessionId: string }> }
-) {
-  const { sessionId } = await params;
+type RouteContext = {
+  params: Promise<{
+    sessionId: string;
+  }>;
+};
 
+async function requireAdmin() {
+  const currentSession = await getCurrentSession();
+
+  if (!currentSession) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "Authentication required.",
+      },
+      { status: 401 },
+    );
+  }
+
+  if (currentSession.role !== "ADMIN") {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "Administrator access required.",
+      },
+      { status: 403 },
+    );
+  }
+
+  return null;
+}
+
+export async function POST(
+  _request: Request,
+  context: RouteContext,
+) {
   try {
-    await prisma.responseLink.update({
-      where: { sessionId },
-      data: { closedAt: new Date() },
+    const authError = await requireAdmin();
+
+    if (authError) {
+      return authError;
+    }
+
+    const { sessionId } = await context.params;
+
+    if (!sessionId) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Invalid session ID.",
+        },
+        { status: 400 },
+      );
+    }
+
+    const link = await prisma.responseLink.findUnique({
+      where: {
+        sessionId,
+      },
+      select: {
+        sessionId: true,
+      },
     });
 
-    return NextResponse.json({ ok: true });
-  } catch (err) {
-    console.error("POST /api/links/[sessionId]/close failed:", err);
+    if (!link) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Response link not found.",
+        },
+        { status: 404 },
+      );
+    }
+
+    await prisma.responseLink.update({
+      where: {
+        sessionId,
+      },
+      data: {
+        closedAt: new Date(),
+      },
+    });
+
+    return NextResponse.json({
+      ok: true,
+    });
+  } catch (error) {
+    console.error(
+      "POST /api/links/[sessionId]/close failed:",
+      error,
+    );
+
     return NextResponse.json(
-      { ok: false, error: "Failed to close link" },
-      { status: 500 }
+      {
+        ok: false,
+        error: "Failed to close response link.",
+      },
+      { status: 500 },
     );
   }
 }
 
 export async function DELETE(
-  _req: Request,
-  { params }: { params: Promise<{ sessionId: string }> }
+  _request: Request,
+  context: RouteContext,
 ) {
-  const { sessionId } = await params;
-
   try {
-    await prisma.responseLink.update({
-      where: { sessionId },
-      data: { closedAt: null },
+    const authError = await requireAdmin();
+
+    if (authError) {
+      return authError;
+    }
+
+    const { sessionId } = await context.params;
+
+    if (!sessionId) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Invalid session ID.",
+        },
+        { status: 400 },
+      );
+    }
+
+    const link = await prisma.responseLink.findUnique({
+      where: {
+        sessionId,
+      },
+      select: {
+        sessionId: true,
+      },
     });
 
-    return NextResponse.json({ ok: true });
-  } catch (err) {
-    console.error("DELETE /api/links/[sessionId]/close failed:", err);
+    if (!link) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Response link not found.",
+        },
+        { status: 404 },
+      );
+    }
+
+    await prisma.responseLink.update({
+      where: {
+        sessionId,
+      },
+      data: {
+        closedAt: null,
+      },
+    });
+
+    return NextResponse.json({
+      ok: true,
+    });
+  } catch (error) {
+    console.error(
+      "DELETE /api/links/[sessionId]/close failed:",
+      error,
+    );
+
     return NextResponse.json(
-      { ok: false, error: "Failed to reopen link" },
-      { status: 500 }
+      {
+        ok: false,
+        error: "Failed to reopen response link.",
+      },
+      { status: 500 },
     );
   }
 }

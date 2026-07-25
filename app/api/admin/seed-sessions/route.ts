@@ -1,28 +1,35 @@
-import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
 import crypto from "crypto";
+import { NextResponse } from "next/server";
+
+import { getCurrentSession } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function toYMD(d: Date) {
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
+function toYMD(date: Date) {
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+
   return `${yyyy}-${mm}-${dd}`;
 }
 
-function addDays(d: Date, days: number) {
-  const x = new Date(d);
-  x.setDate(x.getDate() + days);
-  x.setHours(0, 0, 0, 0);
-  return x;
+function addDays(date: Date, days: number) {
+  const result = new Date(date);
+
+  result.setDate(result.getDate() + days);
+  result.setHours(0, 0, 0, 0);
+
+  return result;
 }
 
 function startOfToday() {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return d;
+  const date = new Date();
+
+  date.setHours(0, 0, 0, 0);
+
+  return date;
 }
 
 function makeToken() {
@@ -30,7 +37,7 @@ function makeToken() {
 }
 
 type Template = {
-  weekday: number; // 0=Sun ... 6=Sat
+  weekday: number;
   startTime: string;
   endTime: string;
   programType: string;
@@ -47,27 +54,62 @@ type ExistingKeyRow = {
   capacity: number;
 };
 
-export async function POST(req: Request) {
-  try {
-    const body = (await req.json().catch(() => null)) as
-      | {
-          weeksAhead?: number;
-          lookbackWeeks?: number;
-          createLinks?: boolean;
-        }
-      | null;
+type RequestBody = {
+  weeksAhead?: number;
+  lookbackWeeks?: number;
+  createLinks?: boolean;
+};
 
-    const weeksAhead = Math.max(1, Math.min(12, body?.weeksAhead ?? 4));
-    const lookbackWeeks = Math.max(1, Math.min(12, body?.lookbackWeeks ?? 6));
-    const createLinks = body?.createLinks ?? true;
+export async function POST(request: Request) {
+  try {
+    const currentSession = await getCurrentSession();
+
+    if (!currentSession) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Authentication required.",
+        },
+        { status: 401 },
+      );
+    }
+
+    if (currentSession.role !== "ADMIN") {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Administrator access required.",
+        },
+        { status: 403 },
+      );
+    }
+
+    const body = (await request.json().catch(() => null)) as RequestBody | null;
+
+    const weeksAhead = Math.max(
+      1,
+      Math.min(
+        12,
+        typeof body?.weeksAhead === "number" ? body.weeksAhead : 4,
+      ),
+    );
+
+    const lookbackWeeks = Math.max(
+      1,
+      Math.min(
+        12,
+        typeof body?.lookbackWeeks === "number" ? body.lookbackWeeks : 6,
+      ),
+    );
+
+    const createLinks =
+      typeof body?.createLinks === "boolean" ? body.createLinks : true;
 
     const today = startOfToday();
-
     const lookbackStart = addDays(today, -lookbackWeeks * 7);
     const lookaheadEnd = addDays(today, weeksAhead * 7);
 
-    // 1) use recent sessions as templates
-    const recent = await prisma.clinicSession.findMany({
+    const recentSessions = await prisma.clinicSession.findMany({
       where: {
         date: {
           gte: toYMD(lookbackStart),
@@ -79,151 +121,157 @@ export async function POST(req: Request) {
 
     const templatesMap = new Map<string, Template>();
 
-    for (const s of recent) {
-      const wd = new Date(`${s.date}T00:00:00`).getDay();
+    for (const session of recentSessions) {
+      const weekday = new Date(`${session.date}T00:00:00`).getDay();
 
-      const t: Template = {
-        weekday: wd,
-        startTime: s.startTime,
-        endTime: s.endTime,
-        programType: s.programType,
-        level: s.level,
-        capacity: s.capacity,
+      const template: Template = {
+        weekday,
+        startTime: session.startTime,
+        endTime: session.endTime,
+        programType: session.programType,
+        level: session.level,
+        capacity: session.capacity,
       };
 
       const key = [
-        t.weekday,
-        t.startTime,
-        t.endTime,
-        t.programType,
-        t.level ?? "null",
-        t.capacity,
+        template.weekday,
+        template.startTime,
+        template.endTime,
+        template.programType,
+        template.level ?? "null",
+        template.capacity,
       ].join("|");
 
-      templatesMap.set(key, t);
+      templatesMap.set(key, template);
     }
 
     const templates = Array.from(templatesMap.values());
 
-    if (!templates.length) {
+    if (templates.length === 0) {
       return NextResponse.json(
-        { ok: false, error: "No recent sessions found to use as templates." },
-        { status: 400 }
+        {
+          ok: false,
+          error: "No recent sessions found to use as templates.",
+        },
+        { status: 400 },
       );
     }
 
-    // 2) preload future sessions so we can skip duplicates
-    const existingFuture = (await prisma.clinicSession.findMany({
-      where: {
-        date: {
-          gte: toYMD(today),
-          lt: toYMD(lookaheadEnd),
+    const existingFutureSessions: ExistingKeyRow[] =
+      await prisma.clinicSession.findMany({
+        where: {
+          date: {
+            gte: toYMD(today),
+            lt: toYMD(lookaheadEnd),
+          },
         },
-      },
-      select: {
-        date: true,
-        startTime: true,
-        endTime: true,
-        programType: true,
-        level: true,
-        capacity: true,
-      },
-    })) as ExistingKeyRow[];
+        select: {
+          date: true,
+          startTime: true,
+          endTime: true,
+          programType: true,
+          level: true,
+          capacity: true,
+        },
+      });
 
-    const keyOf = (x: ExistingKeyRow) =>
-      [
-        x.date,
-        x.startTime,
-        x.endTime,
-        x.programType,
-        x.level ?? "null",
-        x.capacity,
+    function keyOf(session: ExistingKeyRow) {
+      return [
+        session.date,
+        session.startTime,
+        session.endTime,
+        session.programType,
+        session.level ?? "null",
+        session.capacity,
       ].join("|");
+    }
 
-    const existingSet = new Set(existingFuture.map((row: ExistingKeyRow) => keyOf(row)));
+    const existingSet = new Set(
+      existingFutureSessions.map((session) => keyOf(session)),
+    );
 
-    const toCreate: Array<{
-      date: string;
-      startTime: string;
-      endTime: string;
-      programType: string;
-      level: string | null;
-      capacity: number;
-    }> = [];
-
+    const sessionsToCreate: ExistingKeyRow[] = [];
     let skippedSessions = 0;
 
-    // 3) generate
-    for (let d = new Date(today); d < lookaheadEnd; d = addDays(d, 1)) {
-      const weekday = d.getDay();
-      const dateStr = toYMD(d);
+    for (
+      let date = new Date(today);
+      date < lookaheadEnd;
+      date = addDays(date, 1)
+    ) {
+      const weekday = date.getDay();
+      const dateString = toYMD(date);
 
-      for (const t of templates) {
-        if (t.weekday !== weekday) continue;
+      for (const template of templates) {
+        if (template.weekday !== weekday) {
+          continue;
+        }
 
         const candidate: ExistingKeyRow = {
-          date: dateStr,
-          startTime: t.startTime,
-          endTime: t.endTime,
-          programType: t.programType,
-          level: t.level,
-          capacity: t.capacity,
+          date: dateString,
+          startTime: template.startTime,
+          endTime: template.endTime,
+          programType: template.programType,
+          level: template.level,
+          capacity: template.capacity,
         };
 
-        const k = keyOf(candidate);
+        const key = keyOf(candidate);
 
-        if (existingSet.has(k)) {
+        if (existingSet.has(key)) {
           skippedSessions += 1;
           continue;
         }
 
-        toCreate.push({
-          date: dateStr,
-          startTime: t.startTime,
-          endTime: t.endTime,
-          programType: t.programType,
-          level: t.level,
-          capacity: t.capacity,
-        });
-
-        existingSet.add(k);
+        sessionsToCreate.push(candidate);
+        existingSet.add(key);
       }
     }
 
-    // 4) create sessions
     const createdSessions = await prisma.$transaction(
-      toCreate.map((data) => prisma.clinicSession.create({ data }))
+      sessionsToCreate.map((data) =>
+        prisma.clinicSession.create({
+          data,
+        }),
+      ),
     );
 
-    // 5) create response links
     let createdLinks = 0;
-    if (createLinks && createdSessions.length) {
+
+    if (createLinks && createdSessions.length > 0) {
       await prisma.$transaction(
-        createdSessions.map((s: any) =>
+        createdSessions.map((session) =>
           prisma.responseLink.create({
             data: {
               token: makeToken(),
-              sessionId: s.id,
+              sessionId: session.id,
             },
-          })
-        )
+          }),
+        ),
       );
+
       createdLinks = createdSessions.length;
     }
 
     return NextResponse.json({
       ok: true,
       templatesUsed: templates.length,
-      range: { from: toYMD(today), toExclusive: toYMD(lookaheadEnd) },
+      range: {
+        from: toYMD(today),
+        toExclusive: toYMD(lookaheadEnd),
+      },
       createdSessions: createdSessions.length,
       skippedSessions,
       createdLinks,
     });
-  } catch (err: any) {
-    console.error("POST /api/admin/seed-sessions failed:", err);
+  } catch (error) {
+    console.error("POST /api/admin/seed-sessions failed:", error);
+
     return NextResponse.json(
-      { ok: false, error: err?.message ?? "Server error" },
-      { status: 500 }
+      {
+        ok: false,
+        error: "Failed to seed sessions.",
+      },
+      { status: 500 },
     );
   }
 }

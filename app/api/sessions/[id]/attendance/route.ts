@@ -1,80 +1,201 @@
 import { NextResponse } from "next/server";
-import { prisma } from "../../../../../lib/prisma";
+
+import { getCurrentSession } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET(req: Request, ctx: any) {
-  try {
-    const p = await ctx?.params;
-    const id = p?.id;
+type RouteContext = {
+  params: Promise<{
+    id: string;
+  }>;
+};
 
-    if (!id || typeof id !== "string") {
+type AttendanceRow = {
+  attended?: unknown;
+  kidName?: unknown;
+  familyCode?: unknown;
+};
+
+function isAuthorizedRole(role: string) {
+  return role === "ADMIN" || role === "COACH";
+}
+
+export async function GET(
+  _request: Request,
+  context: RouteContext,
+) {
+  try {
+    const currentSession = await getCurrentSession();
+
+    if (!currentSession) {
       return NextResponse.json(
-        { error: "Missing or invalid params.id", got: p ?? null },
-        { status: 400 }
+        { error: "Authentication required." },
+        { status: 401 },
+      );
+    }
+
+    if (!isAuthorizedRole(currentSession.role)) {
+      return NextResponse.json(
+        { error: "Coach or administrator access required." },
+        { status: 403 },
+      );
+    }
+
+    const { id } = await context.params;
+
+    if (!id) {
+      return NextResponse.json(
+        { error: "Invalid session ID." },
+        { status: 400 },
       );
     }
 
     const rows = await prisma.sessionAttendance.findMany({
-      where: { sessionId: id },
-      orderBy: { kidName: "asc" },
+      where: {
+        sessionId: id,
+      },
+      orderBy: {
+        kidName: "asc",
+      },
     });
 
-    return NextResponse.json(rows);
-  } catch (e: any) {
+    return NextResponse.json(rows, {
+      headers: {
+        "Cache-Control": "no-store",
+      },
+    });
+  } catch (error) {
+    console.error(
+      "GET /api/sessions/[id]/attendance failed:",
+      error,
+    );
+
     return NextResponse.json(
-      { error: e?.message ?? String(e), name: e?.name },
-      { status: 500 }
+      { error: "Failed to load attendance." },
+      { status: 500 },
     );
   }
 }
 
-export async function POST(req: Request, ctx: any) {
+export async function POST(
+  request: Request,
+  context: RouteContext,
+) {
   try {
-    const p = await ctx?.params;
-    const id = p?.id;
+    const currentSession = await getCurrentSession();
 
-    if (!id || typeof id !== "string") {
+    if (!currentSession) {
       return NextResponse.json(
-        { error: "Missing or invalid params.id", got: p ?? null },
-        { status: 400 }
+        { error: "Authentication required." },
+        { status: 401 },
       );
     }
 
-    const body = await req.json();
-    const attendance = body.attendance ?? {};
+    if (!isAuthorizedRole(currentSession.role)) {
+      return NextResponse.json(
+        { error: "Coach or administrator access required." },
+        { status: 403 },
+      );
+    }
 
-    const updates = Object.entries(attendance).map(([kidKey, row]: any) =>
-      prisma.sessionAttendance.upsert({
-        where: {
-          sessionId_kidKey: {
-            sessionId: id,
-            kidKey,
+    const { id } = await context.params;
+
+    if (!id) {
+      return NextResponse.json(
+        { error: "Invalid session ID." },
+        { status: 400 },
+      );
+    }
+
+    const body = await request.json().catch(() => null);
+
+    if (
+      !body ||
+      typeof body !== "object" ||
+      !("attendance" in body) ||
+      typeof body.attendance !== "object" ||
+      body.attendance === null ||
+      Array.isArray(body.attendance)
+    ) {
+      return NextResponse.json(
+        { error: "Invalid attendance data." },
+        { status: 400 },
+      );
+    }
+
+    const attendance = body.attendance as Record<
+      string,
+      AttendanceRow
+    >;
+
+    const updates = Object.entries(attendance).map(
+      ([kidKey, row]) => {
+        const trimmedKidKey = kidKey.trim();
+        const kidName =
+          typeof row.kidName === "string"
+            ? row.kidName.trim()
+            : "";
+
+        const familyCode =
+          typeof row.familyCode === "string" &&
+          row.familyCode.trim()
+            ? row.familyCode.trim().toUpperCase()
+            : null;
+
+        if (!trimmedKidKey || !kidName) {
+          throw new Error("Invalid attendance row.");
+        }
+
+        return prisma.sessionAttendance.upsert({
+          where: {
+            sessionId_kidKey: {
+              sessionId: id,
+              kidKey: trimmedKidKey,
+            },
           },
-        },
-        update: {
-          attended: Boolean(row.attended),
-          kidName: String(row.kidName ?? ""),
-          familyCode: row.familyCode ? String(row.familyCode) : null,
-        },
-        create: {
-          sessionId: id,
-          kidKey,
-          kidName: String(row.kidName ?? ""),
-          familyCode: row.familyCode ? String(row.familyCode) : null,
-          attended: Boolean(row.attended),
-        },
-      })
+          update: {
+            attended: row.attended === true,
+            kidName,
+            familyCode,
+          },
+          create: {
+            sessionId: id,
+            kidKey: trimmedKidKey,
+            kidName,
+            familyCode,
+            attended: row.attended === true,
+          },
+        });
+      },
     );
 
     await prisma.$transaction(updates);
 
-    return NextResponse.json({ success: true });
-  } catch (e: any) {
+    return NextResponse.json({
+      success: true,
+      updatedRows: updates.length,
+    });
+  } catch (error) {
+    console.error(
+      "POST /api/sessions/[id]/attendance failed:",
+      error,
+    );
+
+    if (
+      error instanceof Error &&
+      error.message === "Invalid attendance row."
+    ) {
+      return NextResponse.json(
+        { error: "Every attendance row requires a kid key and name." },
+        { status: 400 },
+      );
+    }
+
     return NextResponse.json(
-      { error: e?.message ?? String(e), name: e?.name },
-      { status: 500 }
+      { error: "Failed to save attendance." },
+      { status: 500 },
     );
   }
 }

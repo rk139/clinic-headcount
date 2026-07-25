@@ -1,45 +1,81 @@
 // app/api/sessions/route.ts
 import { NextResponse } from "next/server";
+
+import { getCurrentSession } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
-export const dynamic = "force-dynamic"; // helps avoid any stale caching weirdness
+export const dynamic = "force-dynamic";
 
 function toYMD(d: Date) {
   const yyyy = d.getFullYear();
   const mm = String(d.getMonth() + 1).padStart(2, "0");
   const dd = String(d.getDate()).padStart(2, "0");
+
   return `${yyyy}-${mm}-${dd}`;
 }
 
 function normalizeKidNames(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
+
   return value
-    .filter((n): n is string => typeof n === "string")
-    .map((n) => n.trim())
-    .filter((n) => n.length > 0);
+    .filter((name): name is string => typeof name === "string")
+    .map((name) => name.trim())
+    .filter((name) => name.length > 0);
 }
 
-//  NEW helpers
-function normName(n: string) {
-  return n.trim().toLowerCase().replace(/\s+/g, " ");
+function normName(name: string) {
+  return name.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
-function normFamilyCode(fc: string | null) {
-  return (fc ?? "").trim().toUpperCase();
+function normFamilyCode(familyCode: string | null) {
+  return (familyCode ?? "").trim().toUpperCase();
 }
 
-function prettyFamily(fc: string) {
-    const base = fc.replace(/\d{2}$/, ""); // remove last two digits
-    if (!base) return fc;
-    return base.charAt(0).toUpperCase() + base.slice(1).toLowerCase();
-  }
+function prettyFamily(familyCode: string) {
+  const base = familyCode.replace(/\d{2}$/, "");
 
-type Kid = { key: string; label: string };
+  if (!base) return familyCode;
 
+  return base.charAt(0).toUpperCase() + base.slice(1).toLowerCase();
+}
+
+type Kid = {
+  key: string;
+  label: string;
+};
 
 export async function GET() {
   try {
-    // Return sessions for the next 14 days (including today)
+    const currentSession = await getCurrentSession();
+
+    if (!currentSession) {
+      return NextResponse.json(
+        { error: "Authentication required." },
+        {
+          status: 401,
+          headers: {
+            "Cache-Control": "no-store",
+          },
+        },
+      );
+    }
+
+    if (
+      currentSession.role !== "ADMIN" &&
+      currentSession.role !== "COACH"
+    ) {
+      return NextResponse.json(
+        { error: "You do not have permission to access these sessions." },
+        {
+          status: 403,
+          headers: {
+            "Cache-Control": "no-store",
+          },
+        },
+      );
+    }
+
+    // Return sessions for the next 14 days, including today.
     const start = new Date();
     start.setHours(0, 0, 0, 0);
 
@@ -61,7 +97,7 @@ export async function GET() {
             closedAt: true,
             responses: {
               select: {
-                familyCode: true, //  Phase 1C: needed for dedupe
+                familyCode: true,
                 choice: true,
                 createdAt: true,
                 kidNames: true,
@@ -74,10 +110,10 @@ export async function GET() {
 
     type Session = (typeof sessions)[number];
 
-    const withTotals = sessions.map((s: Session) => {
-      const responses = s.responseLink?.responses ?? [];
+    const withTotals = sessions.map((session: Session) => {
+      const responses = session.responseLink?.responses ?? [];
 
-      //  Phase 1C: keep only the latest response per familyCode
+      // Keep only the latest response from each family.
       const latestByFamily = new Map<
         string,
         {
@@ -90,93 +126,92 @@ export async function GET() {
 
       let lastResponseAt: string | null = null;
 
-      for (const r of responses) {
-        const key = normFamilyCode(r.familyCode);
-        if (!key) continue;
+      for (const response of responses) {
+        const familyKey = normFamilyCode(response.familyCode);
 
-        const current = latestByFamily.get(key);
-        if (!current || r.createdAt > current.createdAt) {
-          latestByFamily.set(key, r);
+        if (!familyKey) continue;
+
+        const current = latestByFamily.get(familyKey);
+
+        if (!current || response.createdAt > current.createdAt) {
+          latestByFamily.set(familyKey, response);
         }
 
-        const iso = r.createdAt.toISOString();
-        if (!lastResponseAt || iso > lastResponseAt) lastResponseAt = iso;
+        const responseTime = response.createdAt.toISOString();
+
+        if (!lastResponseAt || responseTime > lastResponseAt) {
+          lastResponseAt = responseTime;
+        }
       }
 
       const latestResponses = Array.from(latestByFamily.values());
 
       let attendingCount = 0;
       let notAttendingCount = 0;
-
       let attendingKidsCount = 0;
       let notAttendingKidsCount = 0;
 
-      // Old fields (keep for backward compatibility)
       const attendingKidNames: string[] = [];
       const notAttendingKidNames: string[] = [];
 
-      //  NEW fields: include familyCode-based kid keys + display labels
       const attendingKids: Kid[] = [];
       const notAttendingKids: Kid[] = [];
 
-      //  Count only latest response per familyCode
-      for (const r of latestResponses) {
-        const names = normalizeKidNames(r.kidNames);
-        const fc = normFamilyCode(r.familyCode);
-        if (!fc) continue;
+      for (const response of latestResponses) {
+        const names = normalizeKidNames(response.kidNames);
+        const familyCode = normFamilyCode(response.familyCode);
 
-        if (r.choice === "attending") {
+        if (!familyCode) continue;
+
+        if (response.choice === "attending") {
           attendingCount += 1;
           attendingKidsCount += names.length;
 
           for (const kidName of names) {
-            const key = `${fc}:${normName(kidName)}`;
-            const label = `${kidName.trim()} (${prettyFamily(fc)})`;
+            const trimmedName = kidName.trim();
 
-            attendingKidNames.push(kidName.trim());
-            attendingKids.push({ key, label });
+            attendingKidNames.push(trimmedName);
+            attendingKids.push({
+              key: `${familyCode}:${normName(trimmedName)}`,
+              label: `${trimmedName} (${prettyFamily(familyCode)})`,
+            });
           }
-        } else if (r.choice === "not_attending") {
+        } else if (response.choice === "not_attending") {
           notAttendingCount += 1;
           notAttendingKidsCount += names.length;
 
           for (const kidName of names) {
-            const key = `${fc}:${normName(kidName)}`;
-            const label = `${kidName.trim()} (${prettyFamily(fc)})`;
+            const trimmedName = kidName.trim();
 
-            notAttendingKidNames.push(kidName.trim());
-            notAttendingKids.push({ key, label });
+            notAttendingKidNames.push(trimmedName);
+            notAttendingKids.push({
+              key: `${familyCode}:${normName(trimmedName)}`,
+              label: `${trimmedName} (${prettyFamily(familyCode)})`,
+            });
           }
         }
       }
 
       return {
-        ...s,
+        ...session,
 
-        // return token + closedAt (UI needs both)
-        responseLink: s.responseLink
+        responseLink: session.responseLink
           ? {
-              token: s.responseLink.token,
-              closedAt: s.responseLink.closedAt
-                ? s.responseLink.closedAt.toISOString()
+              token: session.responseLink.token,
+              closedAt: session.responseLink.closedAt
+                ? session.responseLink.closedAt.toISOString()
                 : null,
             }
           : null,
 
         attendingCount,
         notAttendingCount,
-
         attendingKidsCount,
         notAttendingKidsCount,
-
-        // old arrays (still returned)
         attendingKidNames,
         notAttendingKidNames,
-
-        //  new arrays (use these on /headcount)
         attendingKids,
         notAttendingKids,
-
         lastResponseAt,
       };
     });
@@ -186,13 +221,17 @@ export async function GET() {
         "Cache-Control": "no-store",
       },
     });
-  } catch (err) {
-    console.error("GET /api/sessions failed:", err);
+  } catch (error) {
+    console.error("GET /api/sessions failed:", error);
 
-    // IMPORTANT: return JSON so the client never crashes on res.json()
     return NextResponse.json(
-      { error: "Failed to load sessions" },
-      { status: 500, headers: { "Cache-Control": "no-store" } }
+      { error: "Failed to load sessions." },
+      {
+        status: 500,
+        headers: {
+          "Cache-Control": "no-store",
+        },
+      },
     );
   }
 }

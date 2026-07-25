@@ -5,9 +5,32 @@ import { prisma } from "@/lib/prisma";
 import { createSessionToken } from "@/lib/auth";
 
 export async function POST(request: NextRequest) {
-  const body = await request.json();
+  let body: unknown;
 
-  const username = body.username;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json(
+      { error: "Invalid request body." },
+      { status: 400 },
+    );
+  }
+
+  if (
+    typeof body !== "object" ||
+    body === null ||
+    !("username" in body) ||
+    !("password" in body) ||
+    typeof body.username !== "string" ||
+    typeof body.password !== "string"
+  ) {
+    return NextResponse.json(
+      { error: "Username and password are required." },
+      { status: 400 },
+    );
+  }
+
+  const username = body.username.trim();
   const password = body.password;
 
   if (!username || !password) {
@@ -73,7 +96,7 @@ export async function POST(request: NextRequest) {
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
     path: "/",
-    maxAge: 60 * 60 * 24 * 7, // 7 days
+    maxAge: 60 * 60 * 24 * 7,
   });
 
   return response;
