@@ -34,7 +34,7 @@ type Template = {
   startTime: string;
   endTime: string;
   programType: string;
-  level: number | null;
+  level: string | null;
   capacity: number;
 };
 
@@ -43,7 +43,7 @@ type ExistingKeyRow = {
   startTime: string;
   endTime: string;
   programType: string;
-  level: number | null;
+  level: string | null;
   capacity: number;
 };
 
@@ -147,7 +147,7 @@ export async function POST(req: Request) {
       startTime: string;
       endTime: string;
       programType: string;
-      level: number | null;
+      level: string | null;
       capacity: number;
     }> = [];
 

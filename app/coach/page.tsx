@@ -1,3 +1,6 @@
+import { redirect } from "next/navigation";
+
+import { getCurrentSession } from "@/lib/auth";
 import CoachBoard from "./CoachBoard";
 
 export type Session = {
@@ -6,11 +9,17 @@ export type Session = {
   startTime: string;
   endTime: string;
   programType: string;
-  level: number | null;
+  level: string | null;
   attendingKidsCount?: number;
   attendingKidNames?: string[];
 };
 
-export default function CoachPage() {
-  return <CoachBoard sessions={[]} />;
+export default async function CoachPage() {
+  const session = await getCurrentSession();
+
+  if (!session) {
+    redirect("/login");
+  }
+
+  return <CoachBoard sessions={[]} role={session.role} />;
 }

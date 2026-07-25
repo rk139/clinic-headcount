@@ -19,7 +19,7 @@ model ClinicSession {
   endTime   String
 
   programType String
-  level       Int?
+  level       String?
 
   capacity Int
 

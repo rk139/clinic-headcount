@@ -30,7 +30,7 @@ function programLabel(_programType: string) {
   return "Clinic Session";
 }
 
-function groupLabel(programType: string, level: number | null) {
+function groupLabel(programType: string, level: string | null) {
   if (programType === "RED_BALL") return "Red Ball";
   return level ? `Level ${level}` : "Juniors";
 }

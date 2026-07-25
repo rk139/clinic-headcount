@@ -1,4 +1,5 @@
 const { PrismaClient } = require("@prisma/client");
+const bcrypt = require("bcryptjs");
 
 const prisma = new PrismaClient();
 
@@ -16,12 +17,56 @@ function addDays(d, days) {
 }
 
 async function main() {
+
+  const adminPasswordHash = await bcrypt.hash("admin123", 12);
+  const coachPasswordHash = await bcrypt.hash("coach123", 12);
+
+  await prisma.user.upsert({
+    where: {
+      username: "admin",
+    },
+    update: {
+      passwordHash: adminPasswordHash,
+      displayName: "Clinic Admin",
+      role: "ADMIN",
+      isActive: true,
+    },
+    create: {
+      username: "admin",
+      passwordHash: adminPasswordHash,
+      displayName: "Clinic Admin",
+      role: "ADMIN",
+      isActive: true,
+    },
+  });
+
+  await prisma.user.upsert({
+    where: {
+      username: "coach",
+    },
+    update: {
+      passwordHash: coachPasswordHash,
+      displayName: "Clinic Coach",
+      role: "COACH",
+      isActive: true,
+    },
+    create: {
+      username: "coach",
+      passwordHash: coachPasswordHash,
+      displayName: "Clinic Coach",
+      role: "COACH",
+      isActive: true,
+    },
+  });
+
+  console.log("Seeded admin and coach users.");
+
   await prisma.clinicSession.deleteMany();
 
   const sessions = [];
 
-  const start = new Date("2026-04-02T00:00:00");
-  const end = new Date("2026-04-25T00:00:00");
+  const start = new Date("2026-07-07T00:00:00");
+  const end = new Date("2026-07-31T00:00:00");
 
   // Default capacities
   const CAP_L1 = 12;
@@ -30,35 +75,23 @@ async function main() {
   const CAP_L4 = 12;
   const CAP_RED = 8;
 
-  // Loop from April 2 → April 25
+  // // Loop from July 7 → July 31
   for (let d = new Date(start); d <= end; d = addDays(d, 1)) {
     const date = ymd(d);
     const dow = d.getDay(); // 0 Sun, 1 Mon, 2 Tue, 3 Wed, 4 Thu, 5 Fri, 6 Sat
 
-    // Mon/Wed
-    if (dow === 1 || dow === 3) {
+    // Mon/Wed/Fri
+    if (dow === 1 || dow === 3 || dow === 5) {
       sessions.push({
         date,
-        startTime: "16:00",
-        endTime: "18:00",
+        startTime: "09:30",
+        endTime: "11:30",
         programType: "JUNIORS",
-        level: 4,
+        level: "3/4",
         capacity: CAP_L4,
         fullSessionCount: 8,
         makeUpCount: 1,
         singleDateCount: 1,
-      });
-
-      sessions.push({
-        date,
-        startTime: "18:00",
-        endTime: "19:00",
-        programType: "JUNIORS",
-        level: 1,
-        capacity: CAP_L1,
-        fullSessionCount: 7,
-        makeUpCount: 1,
-        singleDateCount: 2,
       });
     }
 
@@ -66,10 +99,10 @@ async function main() {
     if (dow === 2 || dow === 4) {
       sessions.push({
         date,
-        startTime: "16:00",
-        endTime: "17:30",
+        startTime: "15:00",
+        endTime: "16:30",
         programType: "JUNIORS",
-        level: 3,
+        level: "2",
         capacity: CAP_L3,
         fullSessionCount: 9,
         makeUpCount: 1,
@@ -78,71 +111,15 @@ async function main() {
 
       sessions.push({
         date,
-        startTime: "17:30",
-        endTime: "19:00",
+        startTime: "16:30",
+        endTime: "17:30",
         programType: "JUNIORS",
-        level: 2,
+        level: "1",
         capacity: CAP_L2,
         fullSessionCount: 10,
         makeUpCount: 2,
         singleDateCount: 1,
       });
-    }
-
-    // Saturday
-    if (dow === 6) {
-      // Red Ball
-      sessions.push({
-        date,
-        startTime: "11:00",
-        endTime: "11:45",
-        programType: "RED_BALL",
-        level: null,
-        capacity: CAP_RED,
-        fullSessionCount: 6,
-        makeUpCount: 0,
-        singleDateCount: 1,
-      });
-
-      // Level 1
-      sessions.push({
-        date,
-        startTime: "12:00",
-        endTime: "13:00",
-        programType: "JUNIORS",
-        level: 1,
-        capacity: CAP_L1,
-        fullSessionCount: 7,
-        makeUpCount: 1,
-        singleDateCount: 1,
-      });
-
-      // Level 2
-      sessions.push({
-        date,
-        startTime: "13:00",
-        endTime: "14:30",
-        programType: "JUNIORS",
-        level: 2,
-        capacity: CAP_L2,
-        fullSessionCount: 10,
-        makeUpCount: 1,
-        singleDateCount: 1,
-      });
-
-      // Level 3
-      sessions.push({
-        date,
-        startTime: "14:30",
-        endTime: "16:00",
-        programType: "JUNIORS",
-        level: 3,
-        capacity: CAP_L3,
-        fullSessionCount: 9,
-        makeUpCount: 1,
-        singleDateCount: 1,
-      });
-
     }
   }
 

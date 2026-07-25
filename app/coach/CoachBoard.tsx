@@ -6,6 +6,11 @@ import type { Session } from "./page";
 
 type CourtMap = Record<string, string[][]>;
 
+type CoachBoardProps = {
+  sessions: Session[];
+  role: "ADMIN" | "COACH";
+};
+
 function getSessionTitle(session: Session) {
   if (session.programType === "RED_BALL") {
     return "Red Ball";
@@ -24,7 +29,10 @@ function formatTime(time: string) {
   const suffix = hour >= 12 ? "PM" : "AM";
 
   hour = hour % 12;
-  if (hour === 0) hour = 12;
+
+  if (hour === 0) {
+    hour = 12;
+  }
 
   return `${hour}:${minute} ${suffix}`;
 }
@@ -34,6 +42,7 @@ function getCourtCount(kidCount: number) {
   if (kidCount <= 8) return 2;
   if (kidCount <= 12) return 3;
   if (kidCount <= 16) return 4;
+
   return 5;
 }
 
@@ -42,6 +51,7 @@ function shuffleArray(names: string[]) {
 
   for (let i = copy.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
+
     [copy[i], copy[j]] = [copy[j], copy[i]];
   }
 
@@ -49,11 +59,16 @@ function shuffleArray(names: string[]) {
 }
 
 function generateCourts(names: string[]) {
-  if (names.length === 0) return [];
+  if (names.length === 0) {
+    return [];
+  }
 
   const shuffled = shuffleArray(names);
   const courtCount = getCourtCount(shuffled.length);
-  const courts: string[][] = Array.from({ length: courtCount }, () => []);
+  const courts: string[][] = Array.from(
+    { length: courtCount },
+    () => [],
+  );
 
   shuffled.forEach((name, index) => {
     courts[index % courtCount].push(name);
@@ -68,13 +83,15 @@ function getTodayYMD() {
 
 export default function CoachBoard({
   sessions: initialSessions,
-}: {
-  sessions: Session[];
-}) {
+  role,
+}: CoachBoardProps) {
   const [sessions, setSessions] = useState<Session[]>(initialSessions);
   const [generatedCourts, setGeneratedCourts] = useState<CourtMap>({});
-  const [loading, setLoading] = useState<boolean>(initialSessions.length === 0);
+  const [loading, setLoading] = useState<boolean>(
+    initialSessions.length === 0,
+  );
   const [error, setError] = useState<string>("");
+  const [logoutBusy, setLogoutBusy] = useState<boolean>(false);
 
   async function loadSessions() {
     setLoading(true);
@@ -87,6 +104,7 @@ export default function CoachBoard({
 
       if (!res.ok) {
         const text = await res.text();
+
         throw new Error(text || "Failed to load sessions");
       }
 
@@ -97,14 +115,49 @@ export default function CoachBoard({
       }
 
       const today = getTodayYMD();
-      const todaysSessions = data.filter((session: Session) => session.date === today);
+
+      const todaysSessions = data.filter(
+        (session: Session) => session.date === today,
+      );
 
       setSessions(todaysSessions);
-    } catch (err: any) {
-      setError(err?.message ?? "Failed to load sessions");
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError("Failed to load sessions");
+      }
+
       setSessions([]);
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleLogout() {
+    setError("");
+    setLogoutBusy(true);
+
+    try {
+      const res = await fetch("/api/auth/logout", {
+        method: "POST",
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+
+        throw new Error(text || "Logout failed");
+      }
+
+      window.location.href = "/login";
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError("Logout failed");
+      }
+
+      setLogoutBusy(false);
     }
   }
 
@@ -113,24 +166,28 @@ export default function CoachBoard({
   }, []);
 
   const sortedSessions = useMemo(() => {
-    return [...sessions].sort((a, b) => a.startTime.localeCompare(b.startTime));
+    return [...sessions].sort((a, b) =>
+      a.startTime.localeCompare(b.startTime),
+    );
   }, [sessions]);
 
   function handleGenerate(session: Session) {
     const names = session.attendingKidNames ?? [];
     const courts = generateCourts(names);
 
-    setGeneratedCourts((prev) => ({
-      ...prev,
+    setGeneratedCourts((previousCourts) => ({
+      ...previousCourts,
       [session.id]: courts,
     }));
   }
 
   function handleClear(sessionId: string) {
-    setGeneratedCourts((prev) => {
-      const next = { ...prev };
-      delete next[sessionId];
-      return next;
+    setGeneratedCourts((previousCourts) => {
+      const nextCourts = { ...previousCourts };
+
+      delete nextCourts[sessionId];
+
+      return nextCourts;
     });
   }
 
@@ -144,16 +201,36 @@ export default function CoachBoard({
           </div>
 
           <div style={styles.topActions}>
-            <Link href="/headcount" style={styles.navLinkBtn}>
-              Headcount
-            </Link>
+            {role === "ADMIN" && (
+              <Link href="/headcount" style={styles.navLinkBtn}>
+                Headcount
+              </Link>
+            )}
 
             <Link href="/history" style={styles.navLinkBtn}>
               History
             </Link>
 
-            <button style={styles.refreshButton} onClick={loadSessions}>
-              Refresh
+            <button
+              type="button"
+              style={styles.refreshButton}
+              onClick={loadSessions}
+              disabled={loading}
+            >
+              {loading ? "Refreshing..." : "Refresh"}
+            </button>
+
+            <button
+              type="button"
+              style={{
+                ...styles.logoutButton,
+                opacity: logoutBusy ? 0.6 : 1,
+                cursor: logoutBusy ? "not-allowed" : "pointer",
+              }}
+              onClick={handleLogout}
+              disabled={logoutBusy}
+            >
+              {logoutBusy ? "Logging out..." : "Logout"}
             </button>
           </div>
         </div>
@@ -163,7 +240,9 @@ export default function CoachBoard({
         {loading ? (
           <div style={styles.emptyState}>Loading sessions...</div>
         ) : sortedSessions.length === 0 ? (
-          <div style={styles.emptyState}>No sessions scheduled for today.</div>
+          <div style={styles.emptyState}>
+            No sessions scheduled for today.
+          </div>
         ) : (
           <div style={styles.cardList}>
             {sortedSessions.map((session) => {
@@ -172,17 +251,23 @@ export default function CoachBoard({
 
               return (
                 <section key={session.id} style={styles.card}>
-                  <h2 style={styles.cardTitle}>{getSessionTitle(session)}</h2>
+                  <h2 style={styles.cardTitle}>
+                    {getSessionTitle(session)}
+                  </h2>
 
                   <p style={styles.time}>
-                    {formatTime(session.startTime)} - {formatTime(session.endTime)}
+                    {formatTime(session.startTime)} -{" "}
+                    {formatTime(session.endTime)}
                   </p>
 
                   <div style={styles.countBlock}>
                     <div style={styles.countNumber}>
                       {session.attendingKidsCount ?? 0}
                     </div>
-                    <div style={styles.countLabel}>kids attending</div>
+
+                    <div style={styles.countLabel}>
+                      kids attending
+                    </div>
                   </div>
 
                   <div style={styles.sectionBlock}>
@@ -191,7 +276,10 @@ export default function CoachBoard({
                     {names.length > 0 ? (
                       <div style={styles.namePills}>
                         {names.map((name, index) => (
-                          <span key={`${session.id}-${index}`} style={styles.pill}>
+                          <span
+                            key={`${session.id}-${index}`}
+                            style={styles.pill}
+                          >
                             {name}
                           </span>
                         ))}
@@ -203,7 +291,15 @@ export default function CoachBoard({
 
                   <div style={styles.buttonRow}>
                     <button
-                      style={styles.generateButton}
+                      type="button"
+                      style={{
+                        ...styles.generateButton,
+                        opacity: names.length === 0 ? 0.6 : 1,
+                        cursor:
+                          names.length === 0
+                            ? "not-allowed"
+                            : "pointer",
+                      }}
                       onClick={() => handleGenerate(session)}
                       disabled={names.length === 0}
                     >
@@ -212,6 +308,7 @@ export default function CoachBoard({
 
                     {courts.length > 0 && (
                       <button
+                        type="button"
                         style={styles.clearButton}
                         onClick={() => handleClear(session.id)}
                       >
@@ -223,8 +320,13 @@ export default function CoachBoard({
                   {courts.length > 0 && (
                     <div style={styles.courtsGrid}>
                       {courts.map((court, index) => (
-                        <div key={`${session.id}-court-${index}`} style={styles.courtCard}>
-                          <h4 style={styles.courtTitle}>Court {index + 1}</h4>
+                        <div
+                          key={`${session.id}-court-${index}`}
+                          style={styles.courtCard}
+                        >
+                          <h4 style={styles.courtTitle}>
+                            Court {index + 1}
+                          </h4>
 
                           <div style={styles.courtNames}>
                             {court.map((name, nameIndex) => (
@@ -306,6 +408,15 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: "14px",
     fontWeight: 600,
     cursor: "pointer",
+  },
+  logoutButton: {
+    border: "1px solid #ef4444",
+    borderRadius: "10px",
+    padding: "10px 14px",
+    backgroundColor: "transparent",
+    color: "#f87171",
+    fontSize: "14px",
+    fontWeight: 600,
   },
   errorBox: {
     marginBottom: "16px",
@@ -393,7 +504,6 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#ffffff",
     fontSize: "14px",
     fontWeight: 600,
-    cursor: "pointer",
   },
   clearButton: {
     border: "1px solid #d1d5db",

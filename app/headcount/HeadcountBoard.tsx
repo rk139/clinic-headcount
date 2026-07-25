@@ -32,7 +32,7 @@ type ClinicSession = {
   startTime: string;
   endTime: string;
   programType: string;
-  level: number | null;
+  level: string | null;
   capacity: number;
   fullSessionCount: number;
   makeUpCount: number;
@@ -45,13 +45,13 @@ type ClinicSession = {
   attendingCount?: number;
   notAttendingCount?: number;
 
-  // ✅ kid-based totals + names
+  // kid-based totals + names
   attendingKidsCount?: number;
   notAttendingKidsCount?: number;
   attendingKidNames?: string[];
   notAttendingKidNames?: string[];
 
-  // ✅ NEW: key+label kids (from /api/sessions)
+  // key+label kids (from /api/sessions)
   attendingKids?: Kid[];
   notAttendingKids?: Kid[];
 
@@ -71,26 +71,34 @@ function displayName(s: ClinicSession) {
 function uniquePreserveOrder(names: string[]) {
   const seen = new Set<string>();
   const out: string[] = [];
+
   for (const n of names) {
     const key = n.trim().toLowerCase();
+
     if (!key) continue;
     if (seen.has(key)) continue;
+
     seen.add(key);
     out.push(n.trim());
   }
+
   return out;
 }
 
 function uniqueKidsPreserveOrder(kids: Kid[]) {
   const seen = new Set<string>();
   const out: Kid[] = [];
+
   for (const k of kids) {
     const key = k.key.trim().toLowerCase();
+
     if (!key) continue;
     if (seen.has(key)) continue;
+
     seen.add(key);
     out.push(k);
   }
+
   return out;
 }
 
@@ -102,18 +110,22 @@ function safeSnippet(s: string, max = 400) {
 // pairings helper functions
 function shuffle(names: string[]) {
   const arr = [...names];
+
   for (let i = arr.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [arr[i], arr[j]] = [arr[j], arr[i]];
   }
+
   return arr;
 }
 
 function chunk(names: string[], groupSize: number) {
   const out: string[][] = [];
+
   for (let i = 0; i < names.length; i += groupSize) {
     out.push(names.slice(i, i + groupSize));
   }
+
   return out;
 }
 
@@ -121,7 +133,7 @@ function cleanName(n: string) {
   return n.replace(/\s+/g, " ").trim();
 }
 
-// ✅ display helpers (only show family hint when name collides)
+// display helpers
 function baseNameFromLabel(label: string) {
   const idx = label.indexOf(" (");
   return (idx >= 0 ? label.slice(0, idx) : label).trim();
@@ -129,16 +141,21 @@ function baseNameFromLabel(label: string) {
 
 function computeDisplayLabelMap(kids: Kid[]) {
   const counts = new Map<string, number>();
+
   for (const k of kids) {
     const base = baseNameFromLabel(k.label).toLowerCase();
+
     if (!base) continue;
+
     counts.set(base, (counts.get(base) ?? 0) + 1);
   }
 
   const idToDisplay = new Map<string, string>();
+
   for (const k of kids) {
     const base = baseNameFromLabel(k.label);
     const c = counts.get(base.toLowerCase()) ?? 0;
+
     idToDisplay.set(k.key, c <= 1 ? base : k.label);
   }
 
@@ -154,8 +171,14 @@ function DraggableKidPill({
   label: string;
   disabled: boolean;
 }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
-    useSortable({ id, disabled });
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id, disabled });
 
   const style: React.CSSProperties = {
     padding: "4px 8px",
@@ -190,10 +213,13 @@ export default function HeadcountBoard() {
   const [linkBusyId, setLinkBusyId] = useState<string | null>(null);
   const [copiedSessionId, setCopiedSessionId] = useState<string | null>(null);
 
+  // logout state
+  const [logoutBusy, setLogoutBusy] = useState(false);
+
   // Step 6 UI state (close/reopen)
   const [closeBusyId, setCloseBusyId] = useState<string | null>(null);
 
-  // ✅ toggle showing names per session
+  // toggle showing names per session
   const [openNamesForId, setOpenNamesForId] = useState<Record<string, boolean>>(
     {}
   );
@@ -221,6 +247,27 @@ export default function HeadcountBoard() {
     })
   );
 
+  const logout = async () => {
+    setError("");
+    setLogoutBusy(true);
+
+    try {
+      const res = await fetch("/api/auth/logout", {
+        method: "POST",
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || "Logout failed");
+      }
+
+      window.location.href = "/login";
+    } catch (e: any) {
+      setError(e?.message ?? "Logout failed");
+      setLogoutBusy(false);
+    }
+  };
+
   const load = async () => {
     setError("");
 
@@ -229,6 +276,7 @@ export default function HeadcountBoard() {
 
       if (!res.ok) {
         const text = await res.text();
+
         throw new Error(
           `Failed to load sessions (${res.status}). ${safeSnippet(text)}`
         );
@@ -236,6 +284,7 @@ export default function HeadcountBoard() {
 
       const raw = await res.text();
       let parsed: unknown;
+
       try {
         parsed = JSON.parse(raw);
       } catch {
@@ -254,7 +303,7 @@ export default function HeadcountBoard() {
       }
 
       if (!Array.isArray(parsed)) {
-        throw new Error(`Unexpected /api/sessions response shape.`);
+        throw new Error("Unexpected /api/sessions response shape.");
       }
 
       setSessions(parsed as ClinicSession[]);
@@ -270,11 +319,13 @@ export default function HeadcountBoard() {
 
   const byDate = useMemo(() => {
     const m = new Map<string, ClinicSession[]>();
+
     for (const s of sessions) {
       const arr = m.get(s.date) ?? [];
       arr.push(s);
       m.set(s.date, arr);
     }
+
     return m;
   }, [sessions]);
 
@@ -327,7 +378,7 @@ export default function HeadcountBoard() {
 
       if (!res.ok) {
         const msg = await res.json().catch(() => ({}));
-        throw new Error((msg as any)?.error || `Failed to generate link`);
+        throw new Error((msg as any)?.error || "Failed to generate link");
       }
 
       await load();
@@ -340,6 +391,7 @@ export default function HeadcountBoard() {
 
   const copyLink = async (token: string, sessionId: string) => {
     const url = `${window.location.origin}/r/${token}`;
+
     await navigator.clipboard.writeText(url);
 
     setCopiedSessionId(sessionId);
@@ -358,10 +410,12 @@ export default function HeadcountBoard() {
       const res = await fetch(`/api/links/${sessionId}/close`, {
         method: "POST",
       });
+
       if (!res.ok) {
         const msg = await res.json().catch(() => ({}));
         throw new Error((msg as any)?.error || "Failed to close link");
       }
+
       await load();
     } catch (e: any) {
       setError(e?.message ?? "Failed to close link");
@@ -378,10 +432,12 @@ export default function HeadcountBoard() {
       const res = await fetch(`/api/links/${sessionId}/close`, {
         method: "DELETE",
       });
+
       if (!res.ok) {
         const msg = await res.json().catch(() => ({}));
         throw new Error((msg as any)?.error || "Failed to reopen link");
       }
+
       await load();
     } catch (e: any) {
       setError(e?.message ?? "Failed to reopen link");
@@ -396,6 +452,7 @@ export default function HeadcountBoard() {
 
   const generatePairings = (sessionId: string, groupSize = 4) => {
     const s = sessions.find((x) => x.id === sessionId);
+
     if (!s) return;
 
     const yesKidsRaw: Kid[] =
@@ -403,20 +460,30 @@ export default function HeadcountBoard() {
         ? s.attendingKids
         : uniquePreserveOrder((s.attendingKidNames ?? []).map(cleanName))
             .filter(Boolean)
-            .map((name) => ({ key: normFallbackKey(name), label: name }));
+            .map((name) => ({
+              key: normFallbackKey(name),
+              label: name,
+            }));
 
     const yesKids = uniqueKidsPreserveOrder(yesKidsRaw);
     const kidIds = yesKids.map((k) => k.key);
 
     if (kidIds.length < 2) {
-      setPairingsBySessionId((prev) => ({ ...prev, [sessionId]: [] }));
+      setPairingsBySessionId((prev) => ({
+        ...prev,
+        [sessionId]: [],
+      }));
+
       return;
     }
 
     const shuffled = shuffle(kidIds);
     const courts = chunk(shuffled, groupSize);
 
-    setPairingsBySessionId((prev) => ({ ...prev, [sessionId]: courts }));
+    setPairingsBySessionId((prev) => ({
+      ...prev,
+      [sessionId]: courts,
+    }));
   };
 
   const clearPairings = (sessionId: string) => {
@@ -428,18 +495,37 @@ export default function HeadcountBoard() {
   };
 
   const COACH_PIN = "1234";
-  const requirePin = () => (window.prompt("Enter coach PIN:") ?? "").trim();
+
+  const requirePin = () => {
+    return (window.prompt("Enter coach PIN:") ?? "").trim();
+  };
 
   const finalizeSession = (sessionId: string) => {
     const pin = requirePin();
-    if (pin !== COACH_PIN) return alert("WRONG PIN");
-    setFinalizedSessionId((prev) => ({ ...prev, [sessionId]: true }));
+
+    if (pin !== COACH_PIN) {
+      alert("WRONG PIN");
+      return;
+    }
+
+    setFinalizedSessionId((prev) => ({
+      ...prev,
+      [sessionId]: true,
+    }));
   };
 
   const unlockSession = (sessionId: string) => {
     const pin = requirePin();
-    if (pin !== COACH_PIN) return alert("WRONG PIN");
-    setFinalizedSessionId((prev) => ({ ...prev, [sessionId]: false }));
+
+    if (pin !== COACH_PIN) {
+      alert("WRONG PIN");
+      return;
+    }
+
+    setFinalizedSessionId((prev) => ({
+      ...prev,
+      [sessionId]: false,
+    }));
   };
 
   function courtId(sessionId: string, courtIndex: number) {
@@ -448,74 +534,117 @@ export default function HeadcountBoard() {
 
   function parseCourtId(id: string) {
     const [prefix, sessionId, idx] = id.split(":");
+
     if (prefix !== "court") return null;
+
     const courtIndex = Number(idx);
-    if (!sessionId || Number.isNaN(courtIndex)) return null;
+
+    if (!sessionId || Number.isNaN(courtIndex)) {
+      return null;
+    }
+
     return { sessionId, courtIndex };
   }
 
   function findCourtForKid(pairings: string[][], kidId: string) {
     for (let i = 0; i < pairings.length; i++) {
-      if (pairings[i]?.includes(kidId)) return i;
+      if (pairings[i]?.includes(kidId)) {
+        return i;
+      }
     }
+
     return -1;
   }
 
   const handleDragOver = (sessionId: string) => (e: DragOverEvent) => {
     const activeId = String(e.active.id);
     const overId = e.over?.id ? String(e.over.id) : null;
+
     if (!overId) return;
 
     setPairingsBySessionId((prev) => {
       const current = prev[sessionId];
-      if (!current || current.length === 0) return prev;
+
+      if (!current || current.length === 0) {
+        return prev;
+      }
 
       const fromCourt = findCourtForKid(current, activeId);
-      if (fromCourt < 0) return prev;
+
+      if (fromCourt < 0) {
+        return prev;
+      }
 
       const overCourtParsed = parseCourtId(overId);
 
       let toCourt = -1;
+
       if (overCourtParsed?.sessionId === sessionId) {
         toCourt = overCourtParsed.courtIndex;
       } else {
         toCourt = findCourtForKid(current, overId);
       }
 
-      if (toCourt < 0 || toCourt === fromCourt) return prev;
+      if (toCourt < 0 || toCourt === fromCourt) {
+        return prev;
+      }
 
       const next = current.map((c) => [...c]);
+
       next[fromCourt] = next[fromCourt].filter((n) => n !== activeId);
       next[toCourt].push(activeId);
 
-      return { ...prev, [sessionId]: next };
+      return {
+        ...prev,
+        [sessionId]: next,
+      };
     });
   };
 
   const handleDragEnd = (sessionId: string) => (e: DragEndEvent) => {
     const activeId = String(e.active.id);
     const overId = e.over?.id ? String(e.over.id) : null;
+
     if (!overId) return;
 
     const overCourtParsed = parseCourtId(overId);
-    if (overCourtParsed?.sessionId === sessionId) return;
+
+    if (overCourtParsed?.sessionId === sessionId) {
+      return;
+    }
 
     setPairingsBySessionId((prev) => {
       const current = prev[sessionId];
-      if (!current || current.length === 0) return prev;
+
+      if (!current || current.length === 0) {
+        return prev;
+      }
 
       const courtIdx = findCourtForKid(current, activeId);
-      if (courtIdx < 0) return prev;
+
+      if (courtIdx < 0) {
+        return prev;
+      }
 
       const overIdx = current[courtIdx].indexOf(overId);
       const activeIdx = current[courtIdx].indexOf(activeId);
-      if (activeIdx === -1 || overIdx === -1 || activeIdx === overIdx)
+
+      if (activeIdx === -1 || overIdx === -1 || activeIdx === overIdx) {
         return prev;
+      }
 
       const next = current.map((c) => [...c]);
-      next[courtIdx] = arrayMove(next[courtIdx], activeIdx, overIdx);
 
-      return { ...prev, [sessionId]: next };
+      next[courtIdx] = arrayMove(
+        next[courtIdx],
+        activeIdx,
+        overIdx
+      );
+
+      return {
+        ...prev,
+        [sessionId]: next,
+      };
     });
   };
 
@@ -527,7 +656,11 @@ export default function HeadcountBoard() {
       background: "#0b0b0f",
       color: "#eaeaf0",
     } as React.CSSProperties,
-    subText: { color: "#a1a1aa" } as React.CSSProperties,
+
+    subText: {
+      color: "#a1a1aa",
+    } as React.CSSProperties,
+
     topRow: {
       display: "flex",
       alignItems: "center",
@@ -535,12 +668,14 @@ export default function HeadcountBoard() {
       gap: 12,
       marginBottom: 18,
     } as React.CSSProperties,
+
     topLeftActions: {
       display: "flex",
       gap: 8,
       alignItems: "center",
       flexWrap: "wrap",
     } as React.CSSProperties,
+
     refreshBtn: {
       padding: "6px 10px",
       borderRadius: 10,
@@ -553,6 +688,7 @@ export default function HeadcountBoard() {
       alignItems: "center",
       justifyContent: "center",
     } as React.CSSProperties,
+
     navLinkBtn: {
       padding: "6px 10px",
       borderRadius: 10,
@@ -565,17 +701,34 @@ export default function HeadcountBoard() {
       alignItems: "center",
       justifyContent: "center",
     } as React.CSSProperties,
+
+    logoutBtn: {
+      padding: "6px 10px",
+      borderRadius: 10,
+      border: "1px solid #ef4444",
+      background: "transparent",
+      color: "#f87171",
+      cursor: logoutBusy ? "not-allowed" : "pointer",
+      opacity: logoutBusy ? 0.6 : 1,
+      textDecoration: "none",
+      display: "inline-flex",
+      alignItems: "center",
+      justifyContent: "center",
+    } as React.CSSProperties,
+
     dateHeader: {
       fontSize: 18,
       marginBottom: 10,
       color: "#eaeaf0",
     } as React.CSSProperties,
+
     card: {
       border: "1px solid #2a2a33",
       borderRadius: 14,
       padding: 14,
       background: "#0f0f16",
     } as React.CSSProperties,
+
     metaRow: {
       marginTop: 10,
       display: "flex",
@@ -584,6 +737,7 @@ export default function HeadcountBoard() {
       color: "#d4d4db",
       alignItems: "center",
     } as React.CSSProperties,
+
     row: {
       marginTop: 12,
       display: "flex",
@@ -591,7 +745,11 @@ export default function HeadcountBoard() {
       flexWrap: "wrap",
       alignItems: "center",
     } as React.CSSProperties,
-    label: { color: "#d4d4db" } as React.CSSProperties,
+
+    label: {
+      color: "#d4d4db",
+    } as React.CSSProperties,
+
     input: {
       width: 84,
       marginLeft: 6,
@@ -602,6 +760,7 @@ export default function HeadcountBoard() {
       padding: "6px 8px",
       outline: "none",
     } as React.CSSProperties,
+
     saveBtn: (isSaving: boolean) =>
       ({
         padding: "8px 14px",
@@ -613,33 +772,35 @@ export default function HeadcountBoard() {
         cursor: isSaving ? "not-allowed" : "pointer",
         marginLeft: "auto",
       }) as React.CSSProperties,
+
     linkChip: {
       fontSize: 12,
       padding: "4px 8px",
       borderRadius: 10,
       border: "1px solid #2a2a33",
       background: "#0b0b0f",
-      color: "#9ca3af"
+      color: "#9ca3af",
     } as React.CSSProperties,
+
     linkBtn: (disabled: boolean, variant?: "copy") =>
-        ({
-          padding: "6px 10px",
-          borderRadius: 10,
-          border:
-            variant === "copy"
-              ? "1px solid #4ade80"
-              : "1px solid #2a2a33",
-          background: disabled ? "#14141c" : "#0b0b0f",
-          color:
-            disabled
-              ? "#7c7c88"
-              : variant === "copy"
-              ? "#4ade80"
-              : "#d4d4db",
-          cursor: disabled ? "not-allowed" : "pointer",
-          opacity: disabled ? 0.6 : 1,
-          transition: "all 0.15s ease",
-        }) as React.CSSProperties,
+      ({
+        padding: "6px 10px",
+        borderRadius: 10,
+        border:
+          variant === "copy"
+            ? "1px solid #4ade80"
+            : "1px solid #2a2a33",
+        background: disabled ? "#14141c" : "#0b0b0f",
+        color: disabled
+          ? "#7c7c88"
+          : variant === "copy"
+            ? "#4ade80"
+            : "#d4d4db",
+        cursor: disabled ? "not-allowed" : "pointer",
+        opacity: disabled ? 0.6 : 1,
+        transition: "all 0.15s ease",
+      }) as React.CSSProperties,
+
     errorBox: {
       marginBottom: 16,
       color: "#fecaca",
@@ -648,6 +809,7 @@ export default function HeadcountBoard() {
       padding: "10px 12px",
       borderRadius: 12,
     } as React.CSSProperties,
+
     namesBtn: {
       padding: "6px 10px",
       borderRadius: 10,
@@ -656,6 +818,7 @@ export default function HeadcountBoard() {
       color: "#d4d4db",
       cursor: "pointer",
     } as React.CSSProperties,
+
     namesPanel: {
       marginTop: 10,
       border: "1px solid #1f2937",
@@ -664,6 +827,7 @@ export default function HeadcountBoard() {
       padding: 12,
       color: "#d4d4db",
     } as React.CSSProperties,
+
     namePill: {
       display: "inline-block",
       fontSize: 12,
@@ -688,10 +852,10 @@ export default function HeadcountBoard() {
           variant === "success"
             ? "#22c55e"
             : variant === "primary"
-            ? "#3b82f6"
-            : variant === "danger"
-            ? "#ef4444"
-            : "transparent",
+              ? "#3b82f6"
+              : variant === "danger"
+                ? "#ef4444"
+                : "transparent",
         color:
           variant === "success" ||
           variant === "primary" ||
@@ -706,14 +870,20 @@ export default function HeadcountBoard() {
 
   return (
     <main style={styles.page}>
-      <h1 style={{ fontSize: 30, marginBottom: 8 }}>Clinic Headcount</h1>
-  
+      <h1 style={{ fontSize: 30, marginBottom: 8 }}>
+        Clinic Headcount
+      </h1>
+
       <div style={styles.topRow}>
         <div style={styles.topLeftActions}>
-          <button onClick={load} style={styles.refreshBtn}>
+          <button
+            type="button"
+            onClick={load}
+            style={styles.refreshBtn}
+          >
             Refresh
           </button>
-  
+
           <Link href="/history" style={styles.navLinkBtn}>
             History
           </Link>
@@ -722,64 +892,98 @@ export default function HeadcountBoard() {
             Coach View
           </Link>
         </div>
+
+        <button
+          type="button"
+          onClick={logout}
+          disabled={logoutBusy}
+          style={styles.logoutBtn}
+        >
+          {logoutBusy ? "Logging out..." : "Logout"}
+        </button>
       </div>
-  
+
       {error ? (
         <div style={styles.errorBox}>
           <strong>Error:</strong> {error}
         </div>
       ) : null}
-  
+
       {dates.map((date) => {
         const daySessions = byDate.get(date)!;
-  
+
         return (
           <section key={date} style={{ marginBottom: 24 }}>
             <h2 style={styles.dateHeader}>{date}</h2>
-  
+
             <div style={{ display: "grid", gap: 12 }}>
               {daySessions.map((s) => {
                 const hasLink = !!s.responseLink?.token;
                 const isClosed = !!s.responseLink?.closedAt;
-                const busy = linkBusyId === s.id || closeBusyId === s.id;
-  
-                const yesKidsObj = uniqueKidsPreserveOrder(s.attendingKids ?? []);
-                const noKidsObj = uniqueKidsPreserveOrder(s.notAttendingKids ?? []);
-  
+                const busy =
+                  linkBusyId === s.id ||
+                  closeBusyId === s.id;
+
+                const yesKidsObj = uniqueKidsPreserveOrder(
+                  s.attendingKids ?? []
+                );
+
+                const noKidsObj = uniqueKidsPreserveOrder(
+                  s.notAttendingKids ?? []
+                );
+
                 const { idToDisplay: yesIdToDisplay } =
                   computeDisplayLabelMap(yesKidsObj);
+
                 const { idToDisplay: noIdToDisplay } =
                   computeDisplayLabelMap(noKidsObj);
-  
+
                 const yesNames = yesKidsObj.map(
-                  (k) => yesIdToDisplay.get(k.key) ?? k.label
+                  (k) =>
+                    yesIdToDisplay.get(k.key) ??
+                    k.label
                 );
+
                 const noNames = noKidsObj.map(
-                  (k) => noIdToDisplay.get(k.key) ?? k.label
+                  (k) =>
+                    noIdToDisplay.get(k.key) ??
+                    k.label
                 );
-  
-                const yesKids = s.attendingKidsCount ?? yesNames.length;
-                const noKids = s.notAttendingKidsCount ?? noNames.length;
-  
-                const isNamesOpen = !!openNamesForId[s.id];
-  
+
+                const yesKids =
+                  s.attendingKidsCount ??
+                  yesNames.length;
+
+                const noKids =
+                  s.notAttendingKidsCount ??
+                  noNames.length;
+
+                const isNamesOpen =
+                  !!openNamesForId[s.id];
+
                 const toggleNames = () =>
                   setOpenNamesForId((prev) => ({
                     ...prev,
                     [s.id]: !prev[s.id],
                   }));
-  
+
                 return (
                   <div key={s.id} style={styles.card}>
                     <div
-                      style={{ display: "flex", justifyContent: "space-between" }}
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                      }}
                     >
-                      <strong style={{ fontSize: 18 }}>{displayName(s)}</strong>
+                      <strong style={{ fontSize: 18 }}>
+                        {displayName(s)}
+                      </strong>
+
                       <span style={styles.subText}>
                         {s.startTime}–{s.endTime}
                       </span>
                     </div>
-  
+
                     <div
                       style={{
                         marginTop: 12,
@@ -798,11 +1002,17 @@ export default function HeadcountBoard() {
                       >
                         {yesKids} kids attending
                       </div>
-  
-                      <div style={{ marginTop: 6, marginBottom: 4, color: "#9ca3af" }}>
+
+                      <div
+                        style={{
+                          marginTop: 6,
+                          marginBottom: 4,
+                          color: "#9ca3af",
+                        }}
+                      >
                         Registered: {s.capacity}
                       </div>
-  
+
                       <div
                         style={{
                           display: "flex",
@@ -818,16 +1028,30 @@ export default function HeadcountBoard() {
                           onClick={toggleNames}
                           style={styles.namesBtn}
                         >
-                          {isNamesOpen ? "Hide names" : "Show names"}
+                          {isNamesOpen
+                            ? "Hide names"
+                            : "Show names"}
                         </button>
-  
-                        <span style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+
+                        <span
+                          style={{
+                            display: "flex",
+                            gap: 8,
+                            flexWrap: "wrap",
+                          }}
+                        >
                           {!hasLink ? (
                             <button
                               type="button"
-                              onClick={() => generateLink(s.id)}
-                              disabled={linkBusyId === s.id}
-                              style={styles.linkBtn(linkBusyId === s.id)}
+                              onClick={() =>
+                                generateLink(s.id)
+                              }
+                              disabled={
+                                linkBusyId === s.id
+                              }
+                              style={styles.linkBtn(
+                                linkBusyId === s.id
+                              )}
                             >
                               {linkBusyId === s.id
                                 ? "Generating..."
@@ -835,14 +1059,21 @@ export default function HeadcountBoard() {
                             </button>
                           ) : isClosed ? (
                             <>
-                              <span style={styles.linkChip}>Link closed</span>
+                              <span style={styles.linkChip}>
+                                Link closed
+                              </span>
+
                               <button
                                 type="button"
-                                onClick={() => reopenLink(s.id)}
+                                onClick={() =>
+                                  reopenLink(s.id)
+                                }
                                 disabled={busy}
                                 style={styles.linkBtn(busy)}
                               >
-                                {closeBusyId === s.id ? "Reopening..." : "Reopen"}
+                                {closeBusyId === s.id
+                                  ? "Reopening..."
+                                  : "Reopen"}
                               </button>
                             </>
                           ) : (
@@ -850,28 +1081,44 @@ export default function HeadcountBoard() {
                               <span style={styles.linkChip}>
                                 /r/{s.responseLink!.token}
                               </span>
+
                               <button
                                 type="button"
-                                onClick={() => copyLink(s.responseLink!.token, s.id)}
+                                onClick={() =>
+                                  copyLink(
+                                    s.responseLink!.token,
+                                    s.id
+                                  )
+                                }
                                 disabled={busy}
-                                style={styles.linkBtn(busy, "copy")}
+                                style={styles.linkBtn(
+                                  busy,
+                                  "copy"
+                                )}
                               >
-                                {copiedSessionId === s.id ? "Copied" : "Copy"}
+                                {copiedSessionId === s.id
+                                  ? "Copied"
+                                  : "Copy"}
                               </button>
+
                               <button
                                 type="button"
-                                onClick={() => closeLink(s.id)}
+                                onClick={() =>
+                                  closeLink(s.id)
+                                }
                                 disabled={busy}
                                 style={styles.linkBtn(busy)}
                               >
-                                {closeBusyId === s.id ? "Closing..." : "Close"}
+                                {closeBusyId === s.id
+                                  ? "Closing..."
+                                  : "Close"}
                               </button>
                             </>
                           )}
                         </span>
                       </div>
                     </div>
-  
+
                     {isNamesOpen ? (
                       <div style={styles.namesPanel}>
                         <div
@@ -884,11 +1131,14 @@ export default function HeadcountBoard() {
                         >
                           Attending ({yesNames.length})
                         </div>
-  
+
                         {yesNames.length ? (
                           <div style={{ marginBottom: 10 }}>
                             {yesNames.map((n, idx) => (
-                              <span key={`y-${idx}-${n}`} style={styles.namePill}>
+                              <span
+                                key={`y-${idx}-${n}`}
+                                style={styles.namePill}
+                              >
                                 {n}
                               </span>
                             ))}
@@ -904,7 +1154,7 @@ export default function HeadcountBoard() {
                             No names yet.
                           </div>
                         )}
-  
+
                         <div
                           style={{
                             fontSize: 12,
@@ -915,17 +1165,25 @@ export default function HeadcountBoard() {
                         >
                           Not attending ({noNames.length})
                         </div>
-  
+
                         {noNames.length ? (
                           <div>
                             {noNames.map((n, idx) => (
-                              <span key={`n-${idx}-${n}`} style={styles.namePill}>
+                              <span
+                                key={`n-${idx}-${n}`}
+                                style={styles.namePill}
+                              >
                                 {n}
                               </span>
                             ))}
                           </div>
                         ) : (
-                          <div style={{ fontSize: 12, color: "#a1a1aa" }}>
+                          <div
+                            style={{
+                              fontSize: 12,
+                              color: "#a1a1aa",
+                            }}
+                          >
                             No names yet.
                           </div>
                         )}
