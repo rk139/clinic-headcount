@@ -7,12 +7,62 @@ import { prisma } from "@/lib/prisma";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function toYMD(date: Date) {
-  const yyyy = date.getFullYear();
-  const mm = String(date.getMonth() + 1).padStart(2, "0");
-  const dd = String(date.getDate()).padStart(2, "0");
+type RequestBody = {
+  startDate?: string;
+  endDate?: string;
+  weekdays?: number[];
+  startTime?: string;
+  endTime?: string;
+  programType?: string;
+  level?: string | null;
+  capacity?: number;
+  createLinks?: boolean;
+};
 
-  return `${yyyy}-${mm}-${dd}`;
+type SessionKeyData = {
+  date: string;
+  startTime: string;
+  endTime: string;
+  programType: string;
+  level: string | null;
+};
+
+function makeToken() {
+  return crypto.randomBytes(16).toString("hex");
+}
+
+function toYMD(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
+
+function parseYMD(value: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+
+  if (!match) {
+    return null;
+  }
+
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+
+  const date = new Date(year, month - 1, day);
+
+  if (
+    date.getFullYear() !== year ||
+    date.getMonth() !== month - 1 ||
+    date.getDate() !== day
+  ) {
+    return null;
+  }
+
+  date.setHours(0, 0, 0, 0);
+
+  return date;
 }
 
 function addDays(date: Date, days: number) {
@@ -24,41 +74,19 @@ function addDays(date: Date, days: number) {
   return result;
 }
 
-function startOfToday() {
-  const date = new Date();
-
-  date.setHours(0, 0, 0, 0);
-
-  return date;
+function isValidTime(value: string) {
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(value);
 }
 
-function makeToken() {
-  return crypto.randomBytes(16).toString("hex");
+function sessionKey(session: SessionKeyData) {
+  return [
+    session.date,
+    session.startTime,
+    session.endTime,
+    session.programType,
+    session.level ?? "null",
+  ].join("|");
 }
-
-type Template = {
-  weekday: number;
-  startTime: string;
-  endTime: string;
-  programType: string;
-  level: string | null;
-  capacity: number;
-};
-
-type ExistingKeyRow = {
-  date: string;
-  startTime: string;
-  endTime: string;
-  programType: string;
-  level: string | null;
-  capacity: number;
-};
-
-type RequestBody = {
-  weeksAhead?: number;
-  lookbackWeeks?: number;
-  createLinks?: boolean;
-};
 
 export async function POST(request: Request) {
   try {
@@ -84,156 +112,238 @@ export async function POST(request: Request) {
       );
     }
 
-    const body = (await request.json().catch(() => null)) as RequestBody | null;
+    const body = (await request.json().catch(() => null)) as
+      | RequestBody
+      | null;
 
-    const weeksAhead = Math.max(
-      1,
-      Math.min(
-        12,
-        typeof body?.weeksAhead === "number" ? body.weeksAhead : 4,
-      ),
-    );
-
-    const lookbackWeeks = Math.max(
-      1,
-      Math.min(
-        12,
-        typeof body?.lookbackWeeks === "number" ? body.lookbackWeeks : 6,
-      ),
-    );
-
-    const createLinks =
-      typeof body?.createLinks === "boolean" ? body.createLinks : true;
-
-    const today = startOfToday();
-    const lookbackStart = addDays(today, -lookbackWeeks * 7);
-    const lookaheadEnd = addDays(today, weeksAhead * 7);
-
-    const recentSessions = await prisma.clinicSession.findMany({
-      where: {
-        date: {
-          gte: toYMD(lookbackStart),
-          lt: toYMD(today),
-        },
-      },
-      orderBy: [{ date: "asc" }, { startTime: "asc" }],
-    });
-
-    const templatesMap = new Map<string, Template>();
-
-    for (const session of recentSessions) {
-      const weekday = new Date(`${session.date}T00:00:00`).getDay();
-
-      const template: Template = {
-        weekday,
-        startTime: session.startTime,
-        endTime: session.endTime,
-        programType: session.programType,
-        level: session.level,
-        capacity: session.capacity,
-      };
-
-      const key = [
-        template.weekday,
-        template.startTime,
-        template.endTime,
-        template.programType,
-        template.level ?? "null",
-        template.capacity,
-      ].join("|");
-
-      templatesMap.set(key, template);
-    }
-
-    const templates = Array.from(templatesMap.values());
-
-    if (templates.length === 0) {
+    if (!body) {
       return NextResponse.json(
         {
           ok: false,
-          error: "No recent sessions found to use as templates.",
+          error: "A valid request body is required.",
         },
         { status: 400 },
       );
     }
 
-    const existingFutureSessions: ExistingKeyRow[] =
-      await prisma.clinicSession.findMany({
-        where: {
-          date: {
-            gte: toYMD(today),
-            lt: toYMD(lookaheadEnd),
-          },
+    if (
+      typeof body.startDate !== "string" ||
+      typeof body.endDate !== "string"
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Start date and end date are required.",
         },
-        select: {
-          date: true,
-          startTime: true,
-          endTime: true,
-          programType: true,
-          level: true,
-          capacity: true,
-        },
-      });
-
-    function keyOf(session: ExistingKeyRow) {
-      return [
-        session.date,
-        session.startTime,
-        session.endTime,
-        session.programType,
-        session.level ?? "null",
-        session.capacity,
-      ].join("|");
+        { status: 400 },
+      );
     }
 
-    const existingSet = new Set(
-      existingFutureSessions.map((session) => keyOf(session)),
+    const startDate = parseYMD(body.startDate);
+    const endDate = parseYMD(body.endDate);
+
+    if (!startDate || !endDate) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Dates must use the YYYY-MM-DD format.",
+        },
+        { status: 400 },
+      );
+    }
+
+    if (endDate < startDate) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "The end date cannot be before the start date.",
+        },
+        { status: 400 },
+      );
+    }
+
+    const maximumEndDate = addDays(startDate, 180);
+
+    if (endDate > maximumEndDate) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "The date range cannot be longer than 180 days.",
+        },
+        { status: 400 },
+      );
+    }
+
+    const weekdays = Array.from(
+      new Set(
+        Array.isArray(body.weekdays)
+          ? body.weekdays.filter(
+              (day) =>
+                Number.isInteger(day) &&
+                day >= 0 &&
+                day <= 6,
+            )
+          : [],
+      ),
     );
 
-    const sessionsToCreate: ExistingKeyRow[] = [];
+    if (weekdays.length === 0) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Select at least one day of the week.",
+        },
+        { status: 400 },
+      );
+    }
+
+    if (
+      typeof body.startTime !== "string" ||
+      typeof body.endTime !== "string" ||
+      !isValidTime(body.startTime) ||
+      !isValidTime(body.endTime)
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Valid start and end times are required.",
+        },
+        { status: 400 },
+      );
+    }
+
+    if (body.endTime <= body.startTime) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "The end time must be after the start time.",
+        },
+        { status: 400 },
+      );
+    }
+
+    if (
+      body.programType !== "JUNIORS" &&
+      body.programType !== "RED_BALL"
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "The program type is invalid.",
+        },
+        { status: 400 },
+      );
+    }
+
+    const level =
+      body.programType === "RED_BALL"
+        ? null
+        : typeof body.level === "string"
+          ? body.level.trim()
+          : "";
+
+    if (body.programType === "JUNIORS" && !level) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "A level is required for junior clinics.",
+        },
+        { status: 400 },
+      );
+    }
+
+    if (
+      !Number.isInteger(body.capacity) ||
+      body.capacity === undefined ||
+      body.capacity < 1 ||
+      body.capacity > 100
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Capacity must be between 1 and 100.",
+        },
+        { status: 400 },
+      );
+    }
+
+    const createLinks =
+      typeof body.createLinks === "boolean"
+        ? body.createLinks
+        : true;
+
+    const existingSessions = await prisma.clinicSession.findMany({
+      where: {
+        date: {
+          gte: toYMD(startDate),
+          lte: toYMD(endDate),
+        },
+      },
+      select: {
+        date: true,
+        startTime: true,
+        endTime: true,
+        programType: true,
+        level: true,
+      },
+    });
+
+    const existingKeys = new Set(
+      existingSessions.map((session) =>
+        sessionKey(session),
+      ),
+    );
+
+    const sessionsToCreate: Array<{
+      date: string;
+      startTime: string;
+      endTime: string;
+      programType: string;
+      level: string | null;
+      capacity: number;
+    }> = [];
+
     let skippedSessions = 0;
 
     for (
-      let date = new Date(today);
-      date < lookaheadEnd;
+      let date = new Date(startDate);
+      date <= endDate;
       date = addDays(date, 1)
     ) {
-      const weekday = date.getDay();
-      const dateString = toYMD(date);
-
-      for (const template of templates) {
-        if (template.weekday !== weekday) {
-          continue;
-        }
-
-        const candidate: ExistingKeyRow = {
-          date: dateString,
-          startTime: template.startTime,
-          endTime: template.endTime,
-          programType: template.programType,
-          level: template.level,
-          capacity: template.capacity,
-        };
-
-        const key = keyOf(candidate);
-
-        if (existingSet.has(key)) {
-          skippedSessions += 1;
-          continue;
-        }
-
-        sessionsToCreate.push(candidate);
-        existingSet.add(key);
+      if (!weekdays.includes(date.getDay())) {
+        continue;
       }
+
+      const candidate = {
+        date: toYMD(date),
+        startTime: body.startTime,
+        endTime: body.endTime,
+        programType: body.programType,
+        level,
+        capacity: body.capacity,
+      };
+
+      const key = sessionKey(candidate);
+
+      if (existingKeys.has(key)) {
+        skippedSessions += 1;
+        continue;
+      }
+
+      sessionsToCreate.push(candidate);
+      existingKeys.add(key);
     }
 
-    const createdSessions = await prisma.$transaction(
-      sessionsToCreate.map((data) =>
-        prisma.clinicSession.create({
-          data,
-        }),
-      ),
-    );
+    const createdSessions =
+      sessionsToCreate.length > 0
+        ? await prisma.$transaction(
+            sessionsToCreate.map((session) =>
+              prisma.clinicSession.create({
+                data: session,
+              }),
+            ),
+          )
+        : [];
 
     let createdLinks = 0;
 
@@ -254,22 +364,24 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       ok: true,
-      templatesUsed: templates.length,
       range: {
-        from: toYMD(today),
-        toExclusive: toYMD(lookaheadEnd),
+        from: toYMD(startDate),
+        through: toYMD(endDate),
       },
       createdSessions: createdSessions.length,
       skippedSessions,
       createdLinks,
     });
   } catch (error) {
-    console.error("POST /api/admin/seed-sessions failed:", error);
+    console.error(
+      "POST /api/admin/seed-sessions failed:",
+      error,
+    );
 
     return NextResponse.json(
       {
         ok: false,
-        error: "Failed to seed sessions.",
+        error: "Failed to generate sessions.",
       },
       { status: 500 },
     );

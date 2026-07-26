@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import SessionGenerator from "./SessionGenerator";
 import { useEffect, useMemo, useState } from "react";
 
 // drag n drop imports
@@ -58,6 +59,15 @@ type ClinicSession = {
   lastResponseAt?: string | null;
 };
 
+type SessionEditDraft = {
+  date: string;
+  startTime: string;
+  endTime: string;
+  programType: string;
+  level: string;
+  capacity: string;
+};
+
 function expected(s: ClinicSession) {
   return s.fullSessionCount + s.makeUpCount + s.singleDateCount;
 }
@@ -66,6 +76,27 @@ function displayName(s: ClinicSession) {
   if (s.programType === "RED_BALL") return "Red Ball";
   if (s.programType === "JUNIORS" && s.level) return `Level ${s.level}`;
   return s.programType;
+}
+
+function formatTimeRange(startTime: string, endTime: string) {
+  const formatTime = (time: string) => {
+    const [hourText, minute = "00"] = time.split(":");
+    const hour24 = Number(hourText);
+    const hour12 = hour24 % 12 || 12;
+    const period = hour24 >= 12 ? "PM" : "AM";
+
+    return {
+      time: `${hour12}:${minute}`,
+      period,
+    };
+  };
+
+  const start = formatTime(startTime);
+  const end = formatTime(endTime);
+
+  return start.period === end.period
+    ? `${start.time}–${end.time} ${end.period}`
+    : `${start.time} ${start.period}–${end.time} ${end.period}`;
 }
 
 function uniquePreserveOrder(names: string[]) {
@@ -209,6 +240,11 @@ export default function HeadcountBoard() {
   const [sessions, setSessions] = useState<ClinicSession[]>([]);
   const [saving, setSaving] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string>("");
+
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState<SessionEditDraft | null>(null);
+  const [editBusyId, setEditBusyId] = useState<string | null>(null);
+  const [deleteBusyId, setDeleteBusyId] = useState<string | null>(null);
 
   const [linkBusyId, setLinkBusyId] = useState<string | null>(null);
   const [copiedSessionId, setCopiedSessionId] = useState<string | null>(null);
@@ -362,6 +398,137 @@ export default function HeadcountBoard() {
       setError(e?.message ?? "Save failed");
     } finally {
       setSaving((prev) => ({ ...prev, [s.id]: false }));
+    }
+  };
+
+
+  const startEditing = (session: ClinicSession) => {
+    setError("");
+    setEditingSessionId(session.id);
+    setEditDraft({
+      date: session.date,
+      startTime: session.startTime,
+      endTime: session.endTime,
+      programType: session.programType,
+      level: session.level ?? "",
+      capacity: String(session.capacity),
+    });
+  };
+
+  const cancelEditing = () => {
+    setEditingSessionId(null);
+    setEditDraft(null);
+  };
+
+  const updateEditDraft = (
+    field: keyof SessionEditDraft,
+    value: string,
+  ) => {
+    setEditDraft((current) =>
+      current
+        ? {
+            ...current,
+            [field]: value,
+          }
+        : current,
+    );
+  };
+
+  const saveSessionEdits = async (sessionId: string) => {
+    if (!editDraft) return;
+
+    setError("");
+    setEditBusyId(sessionId);
+
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          date: editDraft.date,
+          startTime: editDraft.startTime,
+          endTime: editDraft.endTime,
+          programType: editDraft.programType,
+          level: editDraft.level.trim() || null,
+          capacity: Number(editDraft.capacity),
+        }),
+      });
+
+      const result = await res.json().catch(() => null);
+
+      if (!res.ok) {
+        throw new Error(
+          result?.error || `Failed to update session (${res.status})`,
+        );
+      }
+
+      cancelEditing();
+      await load();
+    } catch (e: any) {
+      setError(e?.message ?? "Failed to update session");
+    } finally {
+      setEditBusyId(null);
+    }
+  };
+
+  const requestDeleteSession = async (
+    session: ClinicSession,
+    force = false,
+  ) => {
+    if (!force) {
+      const firstConfirmation = window.confirm(
+        `Delete ${displayName(session)} on ${session.date} at ${session.startTime}?`,
+      );
+
+      if (!firstConfirmation) return;
+    }
+
+    setError("");
+    setDeleteBusyId(session.id);
+
+    try {
+      const query = force ? "?force=true" : "";
+
+      const res = await fetch(`/api/sessions/${session.id}${query}`, {
+        method: "DELETE",
+      });
+
+      const result = await res.json().catch(() => null);
+
+      if (
+        res.status === 409 &&
+        result?.requiresConfirmation
+      ) {
+        const attendanceCount = Number(result.attendanceCount ?? 0);
+        const responseCount = Number(result.responseCount ?? 0);
+
+        const forceConfirmed = window.confirm(
+          `This session has ${attendanceCount} attendance record(s) and ${responseCount} family response(s). Deleting it will permanently remove that data. Delete anyway?`,
+        );
+
+        if (!forceConfirmed) return;
+
+        await requestDeleteSession(session, true);
+        return;
+      }
+
+      if (!res.ok) {
+        throw new Error(
+          result?.error || `Failed to delete session (${res.status})`,
+        );
+      }
+
+      if (editingSessionId === session.id) {
+        cancelEditing();
+      }
+
+      await load();
+    } catch (e: any) {
+      setError(e?.message ?? "Failed to delete session");
+    } finally {
+      setDeleteBusyId(null);
     }
   };
 
@@ -773,6 +940,46 @@ export default function HeadcountBoard() {
         marginLeft: "auto",
       }) as React.CSSProperties,
 
+    editPanel: {
+      marginTop: 12,
+      padding: 14,
+      borderRadius: 12,
+      border: "1px solid #374151",
+      background: "#0b0f14",
+    } as React.CSSProperties,
+
+    editGrid: {
+      display: "grid",
+      gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+      gap: 12,
+    } as React.CSSProperties,
+
+    editField: {
+      display: "grid",
+      gap: 6,
+      fontSize: 12,
+      color: "#d4d4db",
+    } as React.CSSProperties,
+
+    editInput: {
+      width: "100%",
+      boxSizing: "border-box",
+      background: "#0b0b0f",
+      color: "#eaeaf0",
+      border: "1px solid #2a2a33",
+      borderRadius: 10,
+      padding: "8px 10px",
+      outline: "none",
+    } as React.CSSProperties,
+
+    sessionActions: {
+      display: "flex",
+      gap: 8,
+      justifyContent: "flex-end",
+      flexWrap: "wrap",
+      marginTop: 10,
+    } as React.CSSProperties,
+
     linkChip: {
       fontSize: 12,
       padding: "4px 8px",
@@ -903,6 +1110,8 @@ export default function HeadcountBoard() {
         </button>
       </div>
 
+      <SessionGenerator onSuccess={load} />
+
       {error ? (
         <div style={styles.errorBox}>
           <strong>Error:</strong> {error}
@@ -969,20 +1178,175 @@ export default function HeadcountBoard() {
 
                 return (
                   <div key={s.id} style={styles.card}>
-                    <div
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                      }}
-                    >
-                      <strong style={{ fontSize: 18 }}>
-                        {displayName(s)}
-                      </strong>
+                    {editingSessionId === s.id && editDraft ? (
+                      <div style={styles.editPanel}>
+                        <div style={styles.editGrid}>
+                          <label style={styles.editField}>
+                            Date
+                            <input
+                              type="date"
+                              value={editDraft.date}
+                              onChange={(event) =>
+                                updateEditDraft("date", event.target.value)
+                              }
+                              style={styles.editInput}
+                            />
+                          </label>
 
-                      <span style={styles.subText}>
-                        {s.startTime}–{s.endTime}
-                      </span>
-                    </div>
+                          <label style={styles.editField}>
+                            Start time
+                            <input
+                              type="time"
+                              value={editDraft.startTime}
+                              onChange={(event) =>
+                                updateEditDraft(
+                                  "startTime",
+                                  event.target.value,
+                                )
+                              }
+                              style={styles.editInput}
+                            />
+                          </label>
+
+                          <label style={styles.editField}>
+                            End time
+                            <input
+                              type="time"
+                              value={editDraft.endTime}
+                              onChange={(event) =>
+                                updateEditDraft(
+                                  "endTime",
+                                  event.target.value,
+                                )
+                              }
+                              style={styles.editInput}
+                            />
+                          </label>
+
+                          <label style={styles.editField}>
+                            Program
+                            <select
+                              value={editDraft.programType}
+                              onChange={(event) =>
+                                updateEditDraft(
+                                  "programType",
+                                  event.target.value,
+                                )
+                              }
+                              style={styles.editInput}
+                            >
+                              <option value="JUNIORS">Juniors</option>
+                              <option value="RED_BALL">Red Ball</option>
+                            </select>
+                          </label>
+
+                          <label style={styles.editField}>
+                            Level
+                            <input
+                              type="text"
+                              value={editDraft.level}
+                              onChange={(event) =>
+                                updateEditDraft("level", event.target.value)
+                              }
+                              placeholder="Example: 3/4"
+                              style={styles.editInput}
+                            />
+                          </label>
+
+                          <label style={styles.editField}>
+                            Capacity
+                            <input
+                              type="number"
+                              min={1}
+                              step={1}
+                              value={editDraft.capacity}
+                              onChange={(event) =>
+                                updateEditDraft(
+                                  "capacity",
+                                  event.target.value,
+                                )
+                              }
+                              style={styles.editInput}
+                            />
+                          </label>
+                        </div>
+
+                        <div style={styles.sessionActions}>
+                          <button
+                            type="button"
+                            onClick={cancelEditing}
+                            disabled={editBusyId === s.id}
+                            style={styles.pillBtn(
+                              "neutral",
+                              editBusyId === s.id,
+                            )}
+                          >
+                            Cancel
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => saveSessionEdits(s.id)}
+                            disabled={editBusyId === s.id}
+                            style={styles.pillBtn(
+                              "success",
+                              editBusyId === s.id,
+                            )}
+                          >
+                            {editBusyId === s.id
+                              ? "Saving..."
+                              : "Save changes"}
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            gap: 12,
+                            flexWrap: "wrap",
+                          }}
+                        >
+                          <strong style={{ fontSize: 18 }}>
+                            {displayName(s)}
+                          </strong>
+
+                          <span style={styles.subText}>
+                            {formatTimeRange(s.startTime, s.endTime)}
+                          </span>
+                        </div>
+
+                        <div style={styles.sessionActions}>
+                          <button
+                            type="button"
+                            onClick={() => startEditing(s)}
+                            disabled={deleteBusyId === s.id}
+                            style={styles.pillBtn(
+                              "primary",
+                              deleteBusyId === s.id,
+                            )}
+                          >
+                            Edit
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => requestDeleteSession(s)}
+                            disabled={deleteBusyId === s.id}
+                            style={styles.pillBtn(
+                              "danger",
+                              deleteBusyId === s.id,
+                            )}
+                          >
+                            {deleteBusyId === s.id
+                              ? "Deleting..."
+                              : "Delete"}
+                          </button>
+                        </div>
+                      </>
+                    )}
 
                     <div
                       style={{
@@ -1199,9 +1563,3 @@ export default function HeadcountBoard() {
     </main>
   );
 }
-
-
-
-
-
-
