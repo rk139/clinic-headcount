@@ -1,443 +1,805 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 
-type SessionInfo = {
-  dateLabel: string;
-  timeLabel: string;
+type SeriesInfo = {
+  id: string;
+  name: string;
+  programType: string;
   programLabel: string;
-  groupLabel: string;
-  locationLabel?: string;
+  level: string | null;
+  startDate: string;
+  endDate: string;
+  startDateLabel: string;
+  endDateLabel: string;
+  locationLabel: string;
 };
 
-type Choice = "attending" | "not_attending";
+type ChildForm = {
+  childName: string;
+  birthDate: string;
+  medicalNotes: string;
+};
 
-export default function ResponsePage() {
+function createEmptyChild(): ChildForm {
+  return {
+    childName: "",
+    birthDate: "",
+    medicalNotes: "",
+  };
+}
+
+export default function RegistrationPage() {
   const params = useParams();
   const token = params.token as string;
 
-  const [session, setSession] = useState<SessionInfo | null>(null);
+  const [series, setSeries] = useState<SeriesInfo | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string>("");
+  const [loadError, setLoadError] = useState("");
 
-  const [familyCode, setFamilyCode] = useState<string>("");
+  const [parentName, setParentName] = useState("");
+  const [parentPhone, setParentPhone] = useState("");
+  const [parentEmail, setParentEmail] = useState("");
 
-  const [status, setStatus] = useState<"idle" | Choice>("idle");
-  const [savedChoice, setSavedChoice] = useState<Choice | null>(null);
+  const [emergencyContactName, setEmergencyContactName] =
+    useState("");
+  const [emergencyContactPhone, setEmergencyContactPhone] =
+    useState("");
 
-  const [message, setMessage] = useState<string>("");
-  const [isError, setIsError] = useState(false);
+  const [familyCode, setFamilyCode] = useState("");
+
+  const [children, setChildren] = useState<ChildForm[]>([
+    createEmptyChild(),
+  ]);
 
   const [submitting, setSubmitting] = useState(false);
-  const [showSuccessAnim, setShowSuccessAnim] = useState(false);
-
-  const [locked, setLocked] = useState(false);
-
-  const [kidNames, setKidNames] = useState<string[]>([""]);
-  const [submittedKidNames, setSubmittedKidNames] = useState<string[]>([]);
-
-  function updateKidName(i: number, value: string) {
-    setKidNames((prev) => prev.map((v, idx) => (idx === i ? value : v)));
-  }
-
-  function addKidField() {
-    setKidNames((prev) => [...prev, ""]);
-  }
-
-  function removeKidField(i: number) {
-    setKidNames((prev) => {
-      const next = prev.filter((_, idx) => idx !== i);
-      return next.length ? next : [""];
-    });
-  }
-
-  function cleanedKidNames() {
-    return kidNames
-      .map((n) => n.trim())
-      .filter((n) => n.length > 0)
-      .slice(0, 6);
-  }
+  const [formError, setFormError] = useState("");
+  const [successMessage, setSuccessMessage] = useState("");
 
   useEffect(() => {
-    if (!token) return;
+    if (!token) {
+      return;
+    }
 
-    const run = async () => {
+    const loadRegistrationLink = async () => {
       try {
         setLoading(true);
-        setError("");
+        setLoadError("");
 
-        const res = await fetch(`/api/r/${token}`, { cache: "no-store" });
-        const data = await res.json();
+        const response = await fetch(`/api/r/${token}`, {
+          cache: "no-store",
+        });
 
-        if (!res.ok || !data.ok) {
-          setError(data?.error ?? "Invalid or expired link");
-          setSession(null);
-          setSavedChoice(null);
-          setLocked(false);
-          setKidNames([""]);
-          setSubmittedKidNames([]);
+        const data = await response.json();
+
+        if (!response.ok || !data.ok) {
+          setSeries(null);
+          setLoadError(
+            data?.error ??
+              "Invalid or expired registration link.",
+          );
           return;
         }
 
-        setSession(data.session ?? null);
-
-        setSavedChoice(null);
-        setLocked(false);
-
-        setMessage("");
-        setIsError(false);
-        setShowSuccessAnim(false);
-        setStatus("idle");
-
-        setKidNames([""]);
-        setSubmittedKidNames([]);
+        setSeries(data.series ?? null);
       } catch {
-        setError("Something went wrong loading this link.");
-        setSession(null);
-        setSavedChoice(null);
-        setLocked(false);
-        setKidNames([""]);
-        setSubmittedKidNames([]);
+        setSeries(null);
+        setLoadError(
+          "Something went wrong loading this registration link.",
+        );
       } finally {
         setLoading(false);
       }
     };
 
-    run();
+    loadRegistrationLink();
   }, [token]);
 
-  const onChoose = async (choice: Choice) => {
-    setStatus(choice);
-    setMessage("");
-    setIsError(false);
-    setSubmitting(true);
-    setShowSuccessAnim(false);
+  function updateChild(
+    index: number,
+    field: keyof ChildForm,
+    value: string,
+  ) {
+    setChildren((currentChildren) =>
+      currentChildren.map((child, childIndex) =>
+        childIndex === index
+          ? {
+              ...child,
+              [field]: value,
+            }
+          : child,
+      ),
+    );
+  }
 
-    const code = familyCode.trim().toUpperCase();
+  function addChild() {
+    setChildren((currentChildren) => [
+      ...currentChildren,
+      createEmptyChild(),
+    ]);
+  }
 
-    if (!code) {
-      setIsError(true);
-      setMessage("Family Code is required.");
-      setSubmitting(false);
+  function removeChild(index: number) {
+    setChildren((currentChildren) => {
+      const nextChildren = currentChildren.filter(
+        (_, childIndex) => childIndex !== index,
+      );
+
+      return nextChildren.length > 0
+        ? nextChildren
+        : [createEmptyChild()];
+    });
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    setFormError("");
+    setSuccessMessage("");
+
+    const cleanedParentName = parentName.trim();
+    const cleanedParentPhone = parentPhone.trim();
+
+    const cleanedChildren = children
+      .map((child) => ({
+        childName: child.childName.trim(),
+        birthDate: child.birthDate.trim(),
+        medicalNotes: child.medicalNotes.trim(),
+      }))
+      .filter((child) => child.childName.length > 0);
+
+    if (!cleanedParentName) {
+      setFormError("Parent or guardian name is required.");
       return;
     }
 
-    if (!/^[A-Z]{3,}\d{2}$/.test(code)) {
-      setIsError(true);
-      setMessage("Family Code must look like MILLER07 (LASTNAME + 2 digits).");
-      setSubmitting(false);
+    if (!cleanedParentPhone) {
+      setFormError("Parent or guardian phone number is required.");
       return;
     }
 
-    setFamilyCode(code);
-
-    const names = cleanedKidNames();
-
-    if (choice === "attending" && names.length === 0) {
-      setIsError(true);
-      setMessage("Please enter at least one kid’s name.");
-      setSubmitting(false);
+    if (cleanedChildren.length === 0) {
+      setFormError("Please enter at least one child.");
       return;
     }
 
     try {
-      const res = await fetch(`/api/r/${token}/respond`, {
+      setSubmitting(true);
+
+      const response = await fetch(`/api/r/${token}/register`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({
-          familyCode: code,
-          choice,
-          kidNames: names,
+          parentName: cleanedParentName,
+          parentPhone: cleanedParentPhone,
+          parentEmail: parentEmail.trim(),
+          emergencyContactName: emergencyContactName.trim(),
+          emergencyContactPhone: emergencyContactPhone.trim(),
+          familyCode: familyCode.trim().toUpperCase(),
+          children: cleanedChildren,
         }),
       });
 
-      const data = await res.json();
+      const data = await response.json();
 
-      if (!res.ok || !data.ok) {
-        setIsError(true);
-        setMessage(data?.error ?? "Something went wrong. Please try again.");
-        setSubmitting(false);
+      if (!response.ok || !data.ok) {
+        setFormError(
+          data?.error ??
+            "Registration could not be submitted.",
+        );
         return;
       }
 
-      setSavedChoice(choice);
-      setSubmittedKidNames(names);
-
-      setMessage(
-        choice === "attending"
-          ? "Thanks — you’re marked as attending."
-          : "Thanks — you’re marked as not attending."
+      setSuccessMessage(
+        data?.message ??
+          "Registration submitted successfully.",
       );
-
-      setShowSuccessAnim(true);
-      setLocked(true);
-
-      window.setTimeout(() => setShowSuccessAnim(false), 1800);
     } catch {
-      setIsError(true);
-      setMessage("Network error. Please try again.");
+      setFormError(
+        "A network error occurred. Please try again.",
+      );
     } finally {
       setSubmitting(false);
     }
-  };
-
-  const showSessionUI = useMemo(() => !loading && !error && !!session, [
-    loading,
-    error,
-    session,
-  ]);
-
-  const currentChoiceLabel =
-    savedChoice === "attending"
-      ? "Attending"
-      : savedChoice === "not_attending"
-      ? "Not attending"
-      : null;
-
-  const onChangeResponse = () => {
-    setLocked(false);
-    setMessage("");
-    setIsError(false);
-    setShowSuccessAnim(false);
-    setStatus("idle");
-  };
+  }
 
   return (
-    <div className="min-h-screen bg-[#ededed]">
-      <header className="bg-[#1f1f1f] text-white">
-        <div className="mx-auto max-w-4xl px-6 py-5 flex items-center justify-center">
-          <div className="text-lg font-semibold tracking-wide">
-            SPRINGSIDE ATHLETIC CLUB
+    <div style={{ minHeight: "100vh", background: "#f5f6f8", color: "#172033" }}>
+      <header
+        style={{
+          background: "#ffffff",
+          borderBottom: "4px solid #f59e0b",
+        }}
+      >
+        <div
+          style={{
+            maxWidth: 900,
+            margin: "0 auto",
+            padding: "22px 24px",
+            display: "flex",
+            alignItems: "center",
+            gap: 14,
+          }}
+        >
+          <div
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: "50%",
+              background: "#172554",
+              color: "#ffffff",
+              border: "4px solid #f59e0b",
+              display: "grid",
+              placeItems: "center",
+              fontWeight: 900,
+              fontSize: 20,
+            }}
+          >
+            S
+          </div>
+
+          <div>
+            <div
+              style={{
+                color: "#172554",
+                fontSize: 22,
+                fontWeight: 900,
+                letterSpacing: "-0.02em",
+              }}
+            >
+              SPRINGSIDE ATHLETIC CLUB
+            </div>
+            <div
+              style={{
+                color: "#f59e0b",
+                fontSize: 12,
+                fontWeight: 800,
+                letterSpacing: "0.18em",
+                textTransform: "uppercase",
+                marginTop: 3,
+              }}
+            >
+              Junior Tennis
+            </div>
           </div>
         </div>
       </header>
 
-      <section className="mx-auto max-w-4xl px-6 pt-10 pb-6 text-center">
-        <h1 className="text-2xl sm:text-3xl font-extrabold tracking-wide uppercase text-[#141414]">
-          Confirm today’s clinic attendance
+      <section
+        style={{
+          background: "#172554",
+          color: "#ffffff",
+          textAlign: "center",
+          padding: "42px 20px",
+        }}
+      >
+        <h1
+          style={{
+            margin: 0,
+            fontSize: "clamp(30px, 5vw, 42px)",
+            fontWeight: 900,
+            letterSpacing: "-0.03em",
+          }}
+        >
+          Clinic Registration
         </h1>
+        <p
+          style={{
+            margin: "10px auto 0",
+            maxWidth: 560,
+            color: "#dbeafe",
+            fontSize: 16,
+            lineHeight: 1.6,
+          }}
+        >
+          Reserve your child&apos;s place in the clinic series.
+        </p>
       </section>
 
-      <main className="mx-auto max-w-2xl px-6 pb-14">
-        <div className="rounded-2xl bg-white shadow-sm border border-black/5 overflow-hidden">
-          <div className="px-6 py-6 sm:px-8 sm:py-7">
-            <div className="text-center">
-              <div className="text-xs font-semibold uppercase tracking-widest text-black/50">
-                Session details
+      <main
+        style={{
+          maxWidth: 900,
+          margin: "0 auto",
+          padding: "34px 18px 48px",
+        }}
+      >
+        <div
+          style={{
+            background: "#ffffff",
+            border: "1px solid #dbe1ea",
+            borderRadius: 20,
+            boxShadow: "0 18px 50px rgba(15, 23, 42, 0.08)",
+            overflow: "hidden",
+          }}
+        >
+          <div style={{ padding: "clamp(22px, 5vw, 40px)" }}>
+            {loading ? (
+              <div style={{ padding: "60px 0", textAlign: "center", color: "#475569" }}>
+                Loading clinic registration…
               </div>
-
-              {loading ? (
-                <div className="mt-6 text-sm font-semibold text-black/60">
-                  Loading session…
-                </div>
-              ) : error ? (
-                <div className="mt-6 text-sm font-semibold text-red-600">
-                  {error}
-                </div>
-              ) : null}
-
-              {showSessionUI && session ? (
-                <>
-                  <div className="mt-3 text-xl sm:text-2xl font-extrabold text-[#151515]">
-                    {session.dateLabel}
-                  </div>
-
-                  <div className="mt-1 text-base sm:text-lg font-semibold text-black/70">
-                    {session.timeLabel}
-                  </div>
-
-                  <div className="mt-4 flex flex-col sm:flex-row items-center justify-center gap-2 sm:gap-4">
-                    <span className="rounded-full bg-black/5 px-4 py-2 text-sm font-semibold text-black/70">
-                      {session.programLabel}
-                    </span>
-                    <span className="rounded-full bg-black/5 px-4 py-2 text-sm font-semibold text-black/70">
-                      {session.groupLabel}
-                    </span>
-                  </div>
-
-                  {session.locationLabel ? (
-                    <div className="mt-4 text-sm text-black/50">
-                      {session.locationLabel}
-                    </div>
-                  ) : null}
-
-                  {currentChoiceLabel ? (
-                    <div className="mt-4 text-xs font-semibold text-black/45">
-                      Current selection:{" "}
-                      <span className="text-black/70">{currentChoiceLabel}</span>
-                    </div>
-                  ) : null}
-                </>
-              ) : null}
-            </div>
-
-            {showSessionUI && (
+            ) : loadError ? (
+              <MessageBox color="#b91c1c" background="#fef2f2" border="#fecaca">
+                {loadError}
+              </MessageBox>
+            ) : series ? (
               <>
-                {!locked && (
-                  <>
-                    <div className="mt-8">
-                      <div className="text-sm font-semibold text-black/70 text-center">
-                        Family Code (required)
-                      </div>
+                <section
+                  style={{
+                    background: "#eff6ff",
+                    border: "1px solid #bfdbfe",
+                    borderLeft: "6px solid #f59e0b",
+                    borderRadius: 16,
+                    padding: "24px",
+                  }}
+                >
+                  <div
+                    style={{
+                      color: "#d97706",
+                      fontSize: 12,
+                      fontWeight: 900,
+                      letterSpacing: "0.16em",
+                      textTransform: "uppercase",
+                    }}
+                  >
+                    Clinic series
+                  </div>
 
-                      <div className="mt-4">
+                  <h2
+                    style={{
+                      margin: "8px 0 0",
+                      color: "#172554",
+                      fontSize: "clamp(26px, 4vw, 34px)",
+                      fontWeight: 900,
+                      letterSpacing: "-0.02em",
+                    }}
+                  >
+                    {series.name}
+                  </h2>
+
+                  <div
+                    style={{
+                      display: "flex",
+                      flexWrap: "wrap",
+                      gap: 8,
+                      marginTop: 14,
+                    }}
+                  >
+                    <span
+                      style={{
+                        background: "#172554",
+                        color: "#ffffff",
+                        borderRadius: 999,
+                        padding: "8px 13px",
+                        fontSize: 13,
+                        fontWeight: 800,
+                      }}
+                    >
+                      {series.programLabel}
+                    </span>
+
+                    {series.level ? (
+                      <span
+                        style={{
+                          background: "#f59e0b",
+                          color: "#172554",
+                          borderRadius: 999,
+                          padding: "8px 13px",
+                          fontSize: 13,
+                          fontWeight: 900,
+                        }}
+                      >
+                        Level {series.level}
+                      </span>
+                    ) : null}
+                  </div>
+
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
+                      gap: 12,
+                      marginTop: 20,
+                    }}
+                  >
+                    <InfoBox label="Starts" value={series.startDateLabel} />
+                    <InfoBox label="Ends" value={series.endDateLabel} />
+                    <InfoBox label="Location" value={series.locationLabel} />
+                  </div>
+                </section>
+
+                <form onSubmit={handleSubmit} style={{ marginTop: 34 }}>
+                  <FormSection title="Parent or guardian" subtitle="Primary contact information">
+                    <div style={gridStyle}>
+                      <Field label="Name *">
                         <input
-                          value={familyCode}
-                          onChange={(e) =>
-                            setFamilyCode(e.target.value.toUpperCase())
-                          }
-                          autoCapitalize="characters"
-                          autoCorrect="off"
-                          spellCheck={false}
-                          inputMode="text"
-                          placeholder="e.g. KUMAR12"
-                          className="w-full rounded-xl border border-black/15 px-4 py-3 text-sm text-black placeholder:text-black/40 focus:outline-none focus:ring-2 focus:ring-black/30"
+                          value={parentName}
+                          onChange={(event) => setParentName(event.target.value)}
+                          style={inputStyle}
+                          placeholder="Parent or guardian name"
                         />
+                      </Field>
 
-                        <div className="mt-2 text-xs text-black/45 max-w-sm mx-auto leading-relaxed text-left">
-                          <div>Use LAST NAME + 2 digits (example: KUMAR12).</div>
-                          <div>
-                            Use the same code each time so updates replace your
-                            previous response.
-                          </div>
-                        </div>
+                      <Field label="Phone *">
+                        <input
+                          value={parentPhone}
+                          onChange={(event) => setParentPhone(event.target.value)}
+                          inputMode="tel"
+                          style={inputStyle}
+                          placeholder="Phone number"
+                        />
+                      </Field>
+
+                      <div style={{ gridColumn: "1 / -1" }}>
+                        <Field label="Email">
+                          <input
+                            value={parentEmail}
+                            onChange={(event) => setParentEmail(event.target.value)}
+                            type="email"
+                            style={inputStyle}
+                            placeholder="Email address"
+                          />
+                        </Field>
                       </div>
                     </div>
+                  </FormSection>
 
-                    <div className="mt-8">
-                      <div className="text-sm font-semibold text-black/70 text-center">
-                        Enter kid name(s)
-                      </div>
+                  <FormSection title="Emergency contact" subtitle="Someone we can contact if needed">
+                    <div style={gridStyle}>
+                      <Field label="Name">
+                        <input
+                          value={emergencyContactName}
+                          onChange={(event) => setEmergencyContactName(event.target.value)}
+                          style={inputStyle}
+                          placeholder="Emergency contact name"
+                        />
+                      </Field>
 
-                      <div className="mt-4 space-y-3">
-                        {kidNames.map((value, i) => (
-                          <div key={i} className="flex gap-2">
-                            <input
-                              value={value}
-                              onChange={(e) => updateKidName(i, e.target.value)}
-                              placeholder={
-                                i === 0 ? "Kid name" : `Kid name ${i + 1}`
-                              }
-                              className="w-full rounded-xl border border-black/15 px-4 py-3 text-sm text-black placeholder:text-black/40 focus:outline-none focus:ring-2 focus:ring-black/30"
-                            />
+                      <Field label="Phone">
+                        <input
+                          value={emergencyContactPhone}
+                          onChange={(event) => setEmergencyContactPhone(event.target.value)}
+                          inputMode="tel"
+                          style={inputStyle}
+                          placeholder="Emergency contact phone"
+                        />
+                      </Field>
+                    </div>
+                  </FormSection>
 
-                            {kidNames.length > 1 && (
-                              <button
-                                type="button"
-                                onClick={() => removeKidField(i)}
-                                className="shrink-0 rounded-xl border border-black/15 px-3 py-3 text-sm font-semibold text-black/60 hover:bg-black/5"
-                              >
-                                ✕
-                              </button>
-                            )}
-                          </div>
-                        ))}
+                  <section style={{ marginTop: 34 }}>
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "end",
+                        gap: 16,
+                        flexWrap: "wrap",
+                        borderBottom: "1px solid #e2e8f0",
+                        paddingBottom: 12,
+                        marginBottom: 18,
+                      }}
+                    >
+                      <div>
+                        <h3 style={sectionTitleStyle}>Children</h3>
+                        <p style={sectionSubtitleStyle}>Add each child attending the series</p>
                       </div>
 
                       <button
                         type="button"
-                        onClick={addKidField}
-                        className="mt-4 w-full rounded-full border border-[#1f1f1f] bg-white px-6 py-3 text-sm font-bold uppercase text-[#1f1f1f] hover:bg-black/5 transition"
+                        onClick={addChild}
+                        style={{
+                          border: "2px solid #172554",
+                          background: "#ffffff",
+                          color: "#172554",
+                          borderRadius: 999,
+                          padding: "9px 15px",
+                          fontSize: 12,
+                          fontWeight: 900,
+                          cursor: "pointer",
+                        }}
                       >
-                        + Add another kid
+                        + ADD CHILD
                       </button>
                     </div>
 
-                    <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <button
-                        disabled={submitting}
-                        onClick={() => onChoose("attending")}
-                        className={`w-full rounded-full bg-[#1f1f1f] px-6 py-4 text-white font-bold uppercase shadow-sm hover:opacity-90 transition ${
-                          submitting ? "opacity-60 cursor-not-allowed" : ""
-                        }`}
-                      >
-                        {submitting && status === "attending"
-                          ? "Submitting…"
-                          : "✅ Attending"}
-                      </button>
-
-                      <button
-                        disabled={submitting}
-                        onClick={() => onChoose("not_attending")}
-                        className={`w-full rounded-full border border-[#1f1f1f] bg-white px-6 py-4 font-bold uppercase text-[#1f1f1f] hover:bg-black/5 transition ${
-                          submitting ? "opacity-60 cursor-not-allowed" : ""
-                        }`}
-                      >
-                        {submitting && status === "not_attending"
-                          ? "Submitting…"
-                          : "❌ Not attending"}
-                      </button>
-                    </div>
-                  </>
-                )}
-
-                {locked && (
-                  <div className="mt-8">
-                    <div className="rounded-xl px-4 py-4 bg-green-50 text-green-700 border border-green-200 text-center">
-                      <div className="flex items-center justify-center gap-2 text-sm font-semibold">
-                        <span
-                          className={`inline-flex h-7 w-7 items-center justify-center rounded-full bg-green-600 text-white ${
-                            showSuccessAnim ? "animate-bounce" : ""
-                          }`}
+                    <div style={{ display: "grid", gap: 16 }}>
+                      {children.map((child, index) => (
+                        <div
+                          key={index}
+                          style={{
+                            border: "1px solid #dbe1ea",
+                            borderRadius: 15,
+                            overflow: "hidden",
+                            background: "#f8fafc",
+                          }}
                         >
-                          ✓
-                        </span>
-                        <span
-                          className={`${showSuccessAnim ? "animate-pulse" : ""}`}
-                        >
-                          {message || "Thanks — your response has been saved."}
-                        </span>
-                      </div>
+                          <div
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "space-between",
+                              padding: "13px 18px",
+                              background: "#eff6ff",
+                              borderBottom: "1px solid #dbe1ea",
+                            }}
+                          >
+                            <strong style={{ color: "#172554" }}>Child {index + 1}</strong>
 
-                      {submittedKidNames.length > 0 && (
-                        <div className="mt-3 text-xs text-green-800/90">
-                          <div className="font-semibold">Names:</div>
-                          <div className="mt-1">
-                            {submittedKidNames.join(", ")}
+                            {children.length > 1 ? (
+                              <button
+                                type="button"
+                                onClick={() => removeChild(index)}
+                                style={{
+                                  border: 0,
+                                  background: "transparent",
+                                  color: "#b91c1c",
+                                  fontWeight: 800,
+                                  cursor: "pointer",
+                                }}
+                              >
+                                Remove
+                              </button>
+                            ) : null}
+                          </div>
+
+                          <div style={{ ...gridStyle, padding: 18 }}>
+                            <Field label="Child name *">
+                              <input
+                                value={child.childName}
+                                onChange={(event) =>
+                                  updateChild(index, "childName", event.target.value)
+                                }
+                                style={inputStyle}
+                                placeholder="Child name"
+                              />
+                            </Field>
+
+                            <Field label="Birth date">
+                              <input
+                                value={child.birthDate}
+                                onChange={(event) =>
+                                  updateChild(index, "birthDate", event.target.value)
+                                }
+                                type="date"
+                                style={inputStyle}
+                              />
+                            </Field>
+
+                            <div style={{ gridColumn: "1 / -1" }}>
+                              <Field label="Medical notes">
+                                <textarea
+                                  value={child.medicalNotes}
+                                  onChange={(event) =>
+                                    updateChild(index, "medicalNotes", event.target.value)
+                                  }
+                                  rows={3}
+                                  style={{
+                                    ...inputStyle,
+                                    resize: "vertical",
+                                    paddingLeft: "16px",
+                                    paddingRight: "16px",
+                                  }}
+                                  placeholder="Allergies, medical conditions, or other important notes"
+                                />
+                              </Field>
+                            </div>
                           </div>
                         </div>
-                      )}
-
-                      <div className="mt-2 text-xs text-green-700/80">
-                        If you need to change it, you can update your response
-                        below.
-                      </div>
+                      ))}
                     </div>
+                  </section>
 
-                    <button
-                      onClick={onChangeResponse}
-                      className="mt-4 w-full rounded-full border border-[#1f1f1f] bg-white px-6 py-3 text-sm font-bold uppercase text-[#1f1f1f] hover:bg-black/5 transition"
-                    >
-                      Change response
-                    </button>
-                  </div>
-                )}
+                  <FormSection title="Family code" subtitle="Optional">
+                    <Field label="Family code">
+                      <input
+                        value={familyCode}
+                        onChange={(event) =>
+                          setFamilyCode(event.target.value.toUpperCase())
+                        }
+                        autoCapitalize="characters"
+                        autoCorrect="off"
+                        spellCheck={false}
+                        style={{ ...inputStyle, textTransform: "uppercase" }}
+                        placeholder="Optional"
+                      />
+                    </Field>
+                    <p style={{ margin: "8px 0 0", color: "#64748b", fontSize: 12 }}>
+                      Use this code to group siblings or connect this registration with an existing family.
+                    </p>
+                  </FormSection>
 
-                {isError && message && (
-                  <div className="mt-6 rounded-xl px-4 py-3 text-center text-sm font-semibold bg-red-50 text-red-600 border border-red-200">
-                    {message}
-                  </div>
-                )}
+                  {formError ? (
+                    <MessageBox color="#b91c1c" background="#fef2f2" border="#fecaca">
+                      {formError}
+                    </MessageBox>
+                  ) : null}
 
-                {!message && !locked && (
-                  <div className="mt-6 text-center text-xs text-black/45">
-                    You can submit again anytime — your latest response will
-                    replace the old one.
-                  </div>
-                )}
+                  {successMessage ? (
+                    <MessageBox color="#047857" background="#ecfdf5" border="#a7f3d0">
+                      {successMessage}
+                    </MessageBox>
+                  ) : null}
+
+                  <button
+                    type="submit"
+                    disabled={submitting}
+                    style={{
+                      width: "100%",
+                      border: 0,
+                      borderRadius: 12,
+                      background: submitting ? "#94a3b8" : "#f59e0b",
+                      color: "#172554",
+                      padding: "16px 20px",
+                      fontSize: 14,
+                      fontWeight: 900,
+                      letterSpacing: "0.06em",
+                      cursor: submitting ? "not-allowed" : "pointer",
+                      marginTop: 26,
+                    }}
+                  >
+                    {submitting ? "Submitting registration…" : "SUBMIT REGISTRATION"}
+                  </button>
+                </form>
               </>
+            ) : (
+              <MessageBox color="#b91c1c" background="#fef2f2" border="#fecaca">
+                Unable to load this registration.
+              </MessageBox>
             )}
           </div>
 
-          <div className="bg-[#f6f6f6] px-6 py-4 text-center text-xs text-black/50">
-            If you made a mistake, you can submit again — the latest response
-            will count.
-          </div>
+          <footer
+            style={{
+              background: "#f8fafc",
+              borderTop: "1px solid #e2e8f0",
+              padding: "16px",
+              textAlign: "center",
+              color: "#64748b",
+              fontSize: 12,
+              fontWeight: 700,
+            }}
+          >
+            Springside Athletic Club · Akron, Ohio
+          </footer>
         </div>
       </main>
     </div>
   );
 }
 
+const gridStyle = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+  gap: 16,
+};
+
+const inputStyle = {
+  width: "100%",
+  boxSizing: "border-box" as const,
+  marginTop: 7,
+  border: "1px solid #cbd5e1",
+  borderRadius: 11,
+  background: "#ffffff",
+  color: "#0f172a",
+  padding: "13px 14px",
+  fontSize: 14,
+  outline: "none",
+};
+
+const sectionTitleStyle = {
+  margin: 0,
+  color: "#172554",
+  fontSize: 22,
+  fontWeight: 900,
+};
+
+const sectionSubtitleStyle = {
+  margin: "4px 0 0",
+  color: "#64748b",
+  fontSize: 14,
+};
+
+function FormSection({
+  title,
+  subtitle,
+  children,
+}: {
+  title: string;
+  subtitle: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section style={{ marginTop: 34 }}>
+      <div
+        style={{
+          borderBottom: "1px solid #e2e8f0",
+          paddingBottom: 12,
+          marginBottom: 18,
+        }}
+      >
+        <h3 style={sectionTitleStyle}>{title}</h3>
+        <p style={sectionSubtitleStyle}>{subtitle}</p>
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <label style={{ display: "block" }}>
+      <span style={{ color: "#334155", fontSize: 14, fontWeight: 800 }}>
+        {label}
+      </span>
+      {children}
+    </label>
+  );
+}
+
+function InfoBox({ label, value }: { label: string; value: string }) {
+  return (
+    <div
+      style={{
+        background: "#ffffff",
+        border: "1px solid #dbeafe",
+        borderRadius: 12,
+        padding: 14,
+      }}
+    >
+      <div
+        style={{
+          color: "#64748b",
+          fontSize: 11,
+          fontWeight: 900,
+          letterSpacing: "0.12em",
+          textTransform: "uppercase",
+        }}
+      >
+        {label}
+      </div>
+      <div style={{ color: "#172554", fontSize: 14, fontWeight: 900, marginTop: 5 }}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function MessageBox({
+  children,
+  color,
+  background,
+  border,
+}: {
+  children: React.ReactNode;
+  color: string;
+  background: string;
+  border: string;
+}) {
+  return (
+    <div
+      style={{
+        marginTop: 18,
+        border: `1px solid ${border}`,
+        background,
+        color,
+        borderRadius: 12,
+        padding: "14px 16px",
+        textAlign: "center",
+        fontSize: 14,
+        fontWeight: 800,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
 
