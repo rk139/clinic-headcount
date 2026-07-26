@@ -1319,6 +1319,19 @@ export default function HeadcountBoard() {
                         </div>
 
                         <div style={styles.sessionActions}>
+                          <a
+                            href={`/api/sessions/${s.id}/export`}
+                            style={{
+                              ...styles.pillBtn("neutral", false),
+                              textDecoration: "none",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                            }}
+                          >
+                            Export CSV
+                          </a>
+
                           <button
                             type="button"
                             onClick={() => startEditing(s)}
