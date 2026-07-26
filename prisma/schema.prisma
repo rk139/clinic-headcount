@@ -10,10 +10,45 @@ datasource db {
   directUrl = env("POSTGRES_URL_NON_POOLING")
 }
 
-model ClinicSession {
-  //unique id created for each entry automatically
+// A multi-week clinic program.
+//
+// Example:
+// "Summer Session — Juniors Level 3/4"
+//
+// A ClinicSeries contains multiple individual ClinicSession dates.
+// Full-session registrations and permanent QR codes belong here.
+model ClinicSeries {
+  id String @id @default(cuid())
 
-  id        String @id @default(cuid())
+  name String
+
+  programType String
+  level       String?
+
+  startDate String
+  endDate   String
+
+  registrationOpen Boolean @default(false)
+
+  registrationLink RegistrationLink?
+
+  sessions      ClinicSession[]
+  registrations Registration[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([startDate, endDate])
+  @@index([programType, level])
+}
+
+// One actual clinic date.
+//
+// Example:
+// Monday, July 27 from 9:30 AM to 11:30 AM.
+model ClinicSession {
+  id String @id @default(cuid())
+
   date      String
   startTime String
   endTime   String
@@ -23,39 +58,198 @@ model ClinicSession {
 
   capacity Int
 
+  // Temporary compatibility fields from the current app.
+  // We can remove these after the new registration workflow is complete.
   fullSessionCount Int @default(0)
   makeUpCount      Int @default(0)
   singleDateCount  Int @default(0)
 
+  // Optional for now so existing database rows do not break.
+  // New sessions created after this migration should belong to a series.
+  seriesId String?
+  series   ClinicSeries? @relation(fields: [seriesId], references: [id], onDelete: SetNull)
+
+  // Existing response workflow.
+  // We are keeping this temporarily so the current app continues working.
   responseLink ResponseLink?
   attendances  SessionAttendance[]
 
-  // Timestamp when this record was first created
-  createdAt DateTime @default(now())
+  // New workflow.
+  attendanceConfirmations AttendanceConfirmation[]
+  checkIns                CheckIn[]
+  walkIns                 WalkIn[]
 
-  // Timestamp automatically updated whenever this record changes
+  createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  // Uses the date field as an index to quickly find sessions.
-  // I picture it like:
-  //
-  // July 4  ---> Session 1, Session 2
-  // July 5  ---> Session 3
-  // July 6  ---> Session 4, Session 5
-  //
-  // This lets the database quickly find all sessions for a
-  // specific date instead of searching every row.
   @@index([date])
-  // Uses programType and level together as an index.
-  //
-  // Junior, Level 1 ---> Session 2, Session 8
-  // Junior, Level 2 ---> Session 3
-  // Adult,  N/A     ---> Session 5
-  //
-  // This lets the database quickly find sessions that match
-  // both the program type and level.
   @@index([programType, level])
+  @@index([seriesId])
 }
+
+// Public registration link for an entire ClinicSeries.
+//
+// Example:
+// /register/abc123
+model RegistrationLink {
+  id    String @id @default(cuid())
+  token String @unique
+
+  seriesId String       @unique
+  series   ClinicSeries @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+
+  expiresAt DateTime?
+  closedAt  DateTime?
+
+  createdAt DateTime @default(now())
+}
+
+// A child enrolled in the complete ClinicSeries.
+//
+// This is different from confirming attendance for one particular date.
+model Registration {
+  id String @id @default(cuid())
+
+  seriesId String
+  series   ClinicSeries @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+
+  childName String
+
+  parentName  String
+  parentPhone String
+  parentEmail String?
+
+  emergencyContactName  String?
+  emergencyContactPhone String?
+
+  birthDate    String?
+  medicalNotes String?
+
+  // Optional internal code used to group siblings or connect registrations
+  // with older family-based workflows.
+  familyCode String?
+
+  // Permanent QR token for this registration.
+  // The same QR can be used throughout the full ClinicSeries.
+  qrToken String @unique @default(cuid())
+
+  registrationMethod RegistrationMethod @default(PUBLIC_LINK)
+  status             RegistrationStatus @default(ACTIVE)
+
+  attendanceConfirmations AttendanceConfirmation[]
+  checkIns                CheckIn[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([seriesId])
+  @@index([childName])
+  @@index([familyCode])
+}
+
+// One attendance decision for one registered child
+// and one individual clinic date.
+//
+// Example:
+// Ashley is registered for the summer series.
+// For July 27, the parent selects YES.
+model AttendanceConfirmation {
+  id String @id @default(cuid())
+
+  registrationId String
+  registration   Registration @relation(fields: [registrationId], references: [id], onDelete: Cascade)
+
+  sessionId String
+  session   ClinicSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  // Public token used for the parent attendance response page.
+  token String @unique @default(cuid())
+
+  // Null means the parent has not responded yet.
+  choice AttendanceChoice?
+
+  respondedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // One answer per registered child per clinic date.
+  @@unique([registrationId, sessionId])
+  @@index([sessionId])
+  @@index([registrationId])
+}
+
+// A temporary, one-day participant.
+//
+// A walk-in is not enrolled in the entire ClinicSeries,
+// does not receive a permanent QR code,
+// and exists only for this specific ClinicSession.
+model WalkIn {
+  id String @id @default(cuid())
+
+  sessionId String
+  session   ClinicSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  childName String
+
+  parentName  String?
+  parentPhone String?
+  parentEmail String?
+
+  emergencyContactName  String?
+  emergencyContactPhone String?
+
+  medicalNotes String?
+
+  checkIn CheckIn?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([sessionId])
+  @@index([childName])
+}
+
+// Records that someone physically arrived.
+//
+// A check-in can belong to either:
+// 1. A full-session Registration, or
+// 2. A one-day WalkIn.
+//
+// The application will ensure exactly one of those is present.
+model CheckIn {
+  id String @id @default(cuid())
+
+  sessionId String
+  session   ClinicSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  registrationId String?
+  registration   Registration? @relation(fields: [registrationId], references: [id], onDelete: Cascade)
+
+  walkInId String? @unique
+  walkIn   WalkIn? @relation(fields: [walkInId], references: [id], onDelete: Cascade)
+
+  method CheckInMethod
+
+  checkedInAt DateTime @default(now())
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Prevents a registered child from checking into the same session twice.
+  @@unique([sessionId, registrationId])
+  @@index([sessionId])
+  @@index([registrationId])
+}
+
+// -----------------------------------------------------------------------------
+// Existing models
+// -----------------------------------------------------------------------------
+//
+// These remain temporarily so the existing response-link,
+// attendance, coach-view, and export features continue working.
+//
+// We will migrate their functionality after the new workflow is operational.
 
 model ResponseLink {
   id    String @id @default(cuid())
@@ -85,10 +279,7 @@ model SessionResponse {
 
   createdAt DateTime @default(now())
 
-  // ✅ FINAL TOUCH:
-  // One row per family per link — database enforced.
   @@unique([linkId, familyCode])
-  // Helpful indexes
   @@index([linkId])
   @@index([createdAt])
 }
@@ -99,13 +290,9 @@ model SessionAttendance {
   sessionId String
   session   ClinicSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
-  // display name
   kidName String
+  kidKey  String
 
-  // unique internal key to distinguish duplicates like "Raj"
-  kidKey String
-
-  // optional, helpful for debugging
   familyCode String?
 
   attended Boolean @default(true)
@@ -124,6 +311,33 @@ model User {
   displayName  String
   role         Role
   isActive     Boolean @default(true)
+}
+
+// -----------------------------------------------------------------------------
+// Enums
+// -----------------------------------------------------------------------------
+
+enum RegistrationMethod {
+  PUBLIC_LINK
+  ADMIN
+  WALK_IN_CONVERSION
+}
+
+enum RegistrationStatus {
+  ACTIVE
+  CANCELLED
+}
+
+enum AttendanceChoice {
+  YES
+  NO
+}
+
+enum CheckInMethod {
+  QR
+  SEARCH
+  STAFF
+  WALK_IN
 }
 
 enum Role {

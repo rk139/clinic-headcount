@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import AdminNav from "@/components/AdminNav";
 import SessionGenerator from "./SessionGenerator";
 import { useEffect, useMemo, useState } from "react";
 
@@ -856,19 +856,6 @@ export default function HeadcountBoard() {
       justifyContent: "center",
     } as React.CSSProperties,
 
-    navLinkBtn: {
-      padding: "6px 10px",
-      borderRadius: 10,
-      border: "1px solid #2a2a33",
-      background: "transparent",
-      color: "#d4d4db",
-      cursor: "pointer",
-      textDecoration: "none",
-      display: "inline-flex",
-      alignItems: "center",
-      justifyContent: "center",
-    } as React.CSSProperties,
-
     logoutBtn: {
       padding: "6px 10px",
       borderRadius: 10,
@@ -1081,6 +1068,8 @@ export default function HeadcountBoard() {
         Clinic Headcount
       </h1>
 
+      <AdminNav />
+
       <div style={styles.topRow}>
         <div style={styles.topLeftActions}>
           <button
@@ -1090,14 +1079,6 @@ export default function HeadcountBoard() {
           >
             Refresh
           </button>
-
-          <Link href="/history" style={styles.navLinkBtn}>
-            History
-          </Link>
-
-          <Link href="/coach" style={styles.navLinkBtn}>
-            Coach View
-          </Link>
         </div>
 
         <button
