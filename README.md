@@ -1,36 +1,141 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Clinic Attendance Management System
 
-## Getting Started
+A full-stack web application built to streamline attendance management for youth tennis clinics. The system replaces manual attendance tracking with a centralized platform for administrators, coaches, and parents.
 
-First, run the development server:
+The application is actively being expanded and tested through real clinic sessions, with features added based on user feedback.
+
+---
+
+## Features
+
+### Admin
+
+- Create and manage clinic sessions
+- Generate registration and response links
+- View attendance and registration status
+- Edit and delete sessions
+- Export attendance data to CSV
+- Manage coach access
+- Authentication and role-based authorization
+
+### Coaches
+
+- View assigned clinic sessions
+- Check in players
+- Record attendance
+- View walk-in registrations
+
+### Parents
+
+- Register players online
+- Submit attendance responses
+- Register walk-in participants from an iPad kiosk
+
+---
+
+## Tech Stack
+
+### Frontend
+
+- Next.js (App Router)
+- React
+- TypeScript
+
+### Backend
+
+- Next.js API Routes
+- Prisma ORM
+- PostgreSQL
+
+### Authentication
+
+- JWT Authentication
+- Role-Based Authorization
+
+### Deployment
+
+- Vercel
+- Neon PostgreSQL
+
+---
+
+## Project Highlights
+
+- Designed a relational database to manage clinic sessions, registrations, attendance records, users, and check-ins.
+- Built responsive dashboards for administrators and coaches.
+- Implemented secure authentication and protected API routes.
+- Developed registration workflows and attendance tracking.
+- Added CSV export functionality for attendance reporting.
+- Continuously refined the application based on feedback from live clinic sessions.
+
+---
+
+## Future Improvements
+
+- QR code check-in
+- Enhanced reporting and analytics
+- Improved mobile experience
+- Additional coach management tools
+
+---
+
+## Screenshots
+
+*Add screenshots here.*
+
+Examples:
+
+- Admin Dashboard
+- Coach Dashboard
+- Registration Page
+- Attendance View
+- Walk-In Registration
+
+---
+
+## Installation
+
+Clone the repository
+
+```bash
+git clone <repository-url>
+```
+
+Install dependencies
+
+```bash
+npm install
+```
+
+Create an environment file
+
+```env
+DATABASE_URL=
+JWT_SECRET=
+```
+
+Run the development server
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```
+http://localhost:3000
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+---
 
-## Learn More
+## Purpose
 
-To learn more about Next.js, take a look at the following resources:
+This project was developed to replace manual attendance tracking for youth tennis clinics with a modern web application. It serves as an ongoing full-stack software engineering project and continues to evolve with new functionality and production use.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+---
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Author
 
-## Deploy on Vercel
+Raj Kumar
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Computer Science, University of Akron
